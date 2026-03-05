@@ -1,0 +1,29 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+    vec4 position;
+    vec4 velocity;
+};
+
+layout(set = 0, binding = 0, std430) buffer ParticleBuffer {
+    Particle particles[];
+} particleBuffer;
+
+layout(push_constant) uniform ComputeParams {
+    float deltaTime;
+    float bounds;
+} params;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    // Minimal integration step used as the starting point for profiling experiments.
+    particleBuffer.particles[index].position.xyz +=
+        particleBuffer.particles[index].velocity.xyz * params.deltaTime;
+
+    if (particleBuffer.particles[index].position.x > params.bounds) {
+        particleBuffer.particles[index].position.x = -params.bounds;
+    }
+}

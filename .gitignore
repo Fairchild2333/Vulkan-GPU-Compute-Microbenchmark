@@ -1,0 +1,30 @@
+# Build artifacts
+/build/
+/out/
+/bin/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.so
+*.dylib
+
+# CMake artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+Makefile
+
+# Shader binaries
+*.spv
+
+# Editor and AI tool folders
+.vscode/
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
