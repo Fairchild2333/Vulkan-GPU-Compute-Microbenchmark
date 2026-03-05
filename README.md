@@ -1,152 +1,155 @@
-# Vulkan GPU Compute & Rendering Pipeline
+# GPU Compute & Rendering Pipeline — Multi-Backend
 
-This repository now contains a baseline Vulkan project scaffold for a combined
-compute + graphics pipeline portfolio project.
+A real-time particle simulation using GPU compute shaders with three
+interchangeable rendering backends: **Vulkan**, **DirectX 12**, and
+**DirectX 11**. Each backend implements the same particle physics (Euler
+integration in a compute shader) and point-cloud rendering, with GPU
+timestamp profiling.
 
-Current status:
-- Window creation and Vulkan instance/device initialisation are implemented.
-- Queue family setup covers graphics, present, and compute queues.
-- Swapchain, image views, render pass, framebuffers, and command buffers are implemented.
-- Per-frame submit/present synchronisation is implemented with semaphores and fences.
-- The app now renders a visible minimal frame (clear colour pass).
-- GLSL shader placeholders exist for compute, vertex, and fragment stages.
-- Build system compiles the C++ app and optionally compiles shaders to SPIR-V.
+## Supported Backends
 
-## Tech Stack
-
-- C++17
-- Vulkan 1.2
-- GLSL
-- GLFW
-- CMake
-- RenderDoc (planned profiling workflow)
+| Backend | API Level | Platforms | Notes |
+|---------|-----------|-----------|-------|
+| Vulkan  | 1.2       | Windows, Linux | Requires Vulkan SDK + ICD driver |
+| DX12    | Feature Level 11_0 | Windows 10+ | Best compatibility on Windows on ARM |
+| DX11    | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
 
 ## Project Structure
 
 ```text
 .
-├── CMakeLists.txt          # Build config: C++ compilation, GLSL→SPIR-V, post-build copy
+├── CMakeLists.txt
 ├── README.md
-├── .gitignore
 ├── src/
-│   └── main.cpp            # Vulkan app entry point – instance, device, swapchain,
-│                            #   graphics pipeline, compute pipeline, timestamp profiling
+│   ├── main.cpp              # Entry point — backend selection via --backend flag
+│   ├── app_base.h            # Shared base class (window, particles, timing)
+│   ├── app_base.cpp
+│   ├── vulkan_backend.h/cpp  # Vulkan backend
+│   ├── dx12_backend.h/cpp    # DirectX 12 backend
+│   └── dx11_backend.h/cpp    # DirectX 11 backend
 ├── shaders/
-│   ├── compute.comp        # Compute shader – per-particle Euler integration (SSBO + push constants)
-│   ├── particle.vert       # Vertex shader – positions particles as GL_POINT, velocity → colour
-│   └── particle.frag       # Fragment shader – outputs interpolated colour to framebuffer
-└── build/                  # (generated) CMake output
-    └── Release/
-        ├── vulkan_gpu_pipeline.exe
-        ├── compute.comp.spv    # Compiled SPIR-V (auto-copied by CMake post-build)
-        ├── particle.vert.spv
-        └── particle.frag.spv
+│   ├── compute.comp          # Vulkan GLSL compute shader
+│   ├── particle.vert         # Vulkan GLSL vertex shader
+│   ├── particle.frag         # Vulkan GLSL fragment shader
+│   ├── compute.hlsl          # DX12/DX11 compute shader
+│   ├── particle_vs.hlsl      # DX12/DX11 vertex shader
+│   └── particle_ps.hlsl      # DX12/DX11 pixel shader
+└── build/
 ```
 
 ## Prerequisites
 
 | Dependency | Install |
 |---|---|
-| **Vulkan SDK** | Download from [LunarG](https://vulkan.lunarg.com/sdk/home) and run the installer. This provides the Vulkan headers, libraries, `glslc` shader compiler, and validation layers. After installation, the `VULKAN_SDK` environment variable should be set automatically. |
-| **GLFW** | Install via [vcpkg](https://github.com/microsoft/vcpkg): `vcpkg install glfw3:x64-windows` |
 | **CMake 3.20+** | https://cmake.org/download/ |
-| **C++17 compiler** | MSVC (Visual Studio Build Tools) or Clang |
+| **C++17 compiler** | MSVC (Visual Studio 2019+) or Clang |
+| **GLFW** | `vcpkg install glfw3` (with appropriate triplet) |
+| **Vulkan SDK** (optional) | [LunarG](https://vulkan.lunarg.com/sdk/home) |
+| **Windows SDK** (for DX) | Included with Visual Studio |
 
-Verify your environment:
+### Windows on ARM
 
 ```powershell
-vulkaninfo --summary   # should list your GPU(s)
-glslc --version        # should print shaderc version
+vcpkg install glfw3:arm64-windows
 ```
 
-> **Note:** If `glslc` is not found after installing the Vulkan SDK, restart your
-> IDE / terminal so the updated `PATH` takes effect.
+The DX12 and DX11 backends only need the Windows SDK (bundled with Visual
+Studio). No additional driver installation is needed — D3D12/D3D11 work
+through the built-in Windows graphics stack.
 
-## Build (Windows)
+## Build
+
+### Verify Environment Variables
+
+Before building, ensure that `cmake`, `cl` (MSVC compiler), and `glslc`
+(Vulkan shader compiler — optional) are available in your system or user
+**PATH** environment variable. You can quickly verify in PowerShell:
 
 ```powershell
-# Configure (use vcpkg toolchain so CMake can find GLFW), only need run in first time
+cmake --version   # Should be 3.20+
+cl                # Should print MSVC version information
+glslc --version   # Optional — only required for the Vulkan backend
+```
+
+If any of these commands are not recognised, the corresponding tool is not
+in your PATH. Typical default paths are listed below (using Visual Studio
+2026 Community on ARM64 as an example — adjust to match your installation):
+
+| Tool | Default Path |
+|------|-------------|
+| cmake | `C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin` |
+| cl | `C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\<version>\bin\Hostarm64\arm64` |
+| glslc | `C:\VulkanSDK\<version>\Bin` |
+
+Add the relevant directories to **User environment variables → Path**, then
+reopen your terminal for the changes to take effect.
+
+### Build Steps
+
+```powershell
+# Configure (vcpkg toolchain, all backends auto-detected)
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
 
-# Compile (shaders are automatically compiled to SPIR-V)
+# For ARM64 native builds:
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=arm64-windows -A ARM64
+
+# Build
 cmake --build build --config Release
+```
+
+### Backend Toggles
+
+```powershell
+cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON ...
 ```
 
 ## Run
 
 ```powershell
-.\build\Release\vulkan_gpu_pipeline.exe
+.\build\Release\gpu_benchmark.exe                    # auto-select backend
+.\build\Release\gpu_benchmark.exe --backend vulkan    # force Vulkan
+.\build\Release\gpu_benchmark.exe --backend dx12      # force DX12
+.\build\Release\gpu_benchmark.exe --backend dx11      # force DX11
+.\build\Release\gpu_benchmark.exe --backend dx12 --gpu 1   # DX12 + specific GPU
+.\build\Release\gpu_benchmark.exe --help
 ```
 
-On startup the app lists every Vulkan-capable GPU and selects one:
-
-```
-Available GPUs:
-  [0] NVIDIA GeForce RTX 5090 (Discrete GPU)
-  [1] AMD Radeon(TM) Graphics (Integrated GPU)
-Selected GPU [0]: NVIDIA GeForce RTX 5090
-```
-
-### GPU Selection
-
-By default the app prefers a discrete GPU. Use `--gpu <index>` to override:
-
-```powershell
-# Use the NVIDIA discrete GPU (index 0)
-.\build\Release\vulkan_gpu_pipeline.exe --gpu 0
-
-# Use the AMD integrated GPU (index 1)
-.\build\Release\vulkan_gpu_pipeline.exe --gpu 1
-```
-
-The index corresponds to the `[N]` shown in the GPU list at startup.
+The auto-selection prefers DX12 on Windows (best WoA compatibility),
+falls back to DX11, then Vulkan.
 
 ## GPU Profiling
 
-The app uses Vulkan **timestamp queries** to measure GPU-side timings
-(separate from CPU frame time). Four timestamps are written per frame:
+All three backends write 4 timestamps per frame:
 
-| Index | Where | Pipeline stage |
-|-------|-------|----------------|
-| 0 | Before compute dispatch | `TOP_OF_PIPE` |
-| 1 | After compute dispatch | `COMPUTE_SHADER` |
-| 2 | Before render pass | `TOP_OF_PIPE` |
-| 3 | After render pass | `COLOR_ATTACHMENT_OUTPUT` |
+| Index | Where | Stage |
+|-------|-------|-------|
+| 0 | Before compute dispatch | Pipeline start |
+| 1 | After compute dispatch | Compute complete |
+| 2 | Before render pass | Pipeline start |
+| 3 | After render pass | Render complete |
 
-Every second the app prints an averaged summary to **stdout** and updates
-the window title:
+Every second the application prints averaged timing to stdout:
 
 ```
 [GPU Timing] Compute: 0.031 ms | Render: 0.054 ms | Total GPU: 0.112 ms | FPS: 3200
 ```
 
-> **Note:** If the selected GPU queue family does not support timestamps
-> (timestampValidBits == 0), profiling is silently disabled and only FPS is
-> reported.
+## Architecture
 
-### RenderDoc
+```
+         ┌──────────┐
+         │ AppBase  │  window, particles, timing
+         └────┬─────┘
+      ┌───────┼───────┐
+      │       │       │
+┌─────┴──┐ ┌──┴───┐ ┌─┴──────┐
+│ Vulkan │ │ DX12 │ │  DX11  │
+│Backend │ │Backend│ │Backend │
+└────────┘ └──────┘ └────────┘
+```
 
-For deeper analysis, attach [RenderDoc](https://renderdoc.org/) to the
-executable and capture a frame. The tool will display per-draw-call timings,
-resource state, and shader debugging for both the compute and graphics passes.
-
-## Next Milestones
-
-1. ~~Add swapchain, render pass, and graphics pipeline creation.~~
-2. ~~Add a minimal graphics pipeline and draw call (particle point cloud).~~
-3. ~~Add storage buffers and compute pipeline for particle simulation.~~
-4. ~~Add compute-to-graphics synchronisation (barriers + semaphores).~~
-5. ~~Add timestamp queries and GPU profiling.~~
-6. Add workgroup-size tuning experiments and analysis.
-7. Add RenderDoc frame-capture walkthrough documentation.
-
-## Resume-Oriented Outcome Targets
-
-After finishing the milestones, this project can support resume points such as:
-
-- Built a real-time particle simulation using Vulkan compute shaders with
-	GPU-side storage buffers.
-- Implemented a Vulkan graphics pipeline (descriptors, uniform buffers,
-	command buffers, synchronisation) to render compute outputs.
-- Profiled on AMD RDNA2 and NVIDIA GPUs using RenderDoc and Vulkan timestamps,
-	then tuned workgroup sizing and memory-access patterns.
+Each backend overrides:
+- `InitBackend()` — create device, pipelines, buffers
+- `DrawFrame(dt)` — dispatch compute, render, present
+- `CleanupBackend()` — release GPU resources
+- `GetBackendName()` / `GetDeviceName()` — for display
