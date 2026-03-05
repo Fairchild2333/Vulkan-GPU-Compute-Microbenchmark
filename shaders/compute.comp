@@ -1,5 +1,13 @@
 #version 450
 
+// Compute shader for particle simulation (planned integration).
+//
+// Workgroup size of 256 is a common choice that balances occupancy across
+// both AMD and NVIDIA architectures.  Each invocation updates one particle.
+//
+// The SSBO layout matches the C++ Particle struct (2 x vec4 = 32 bytes).
+// Push constants supply per-frame parameters without descriptor updates.
+
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 struct Particle {
@@ -7,22 +15,25 @@ struct Particle {
     vec4 velocity;
 };
 
+// std430 layout guarantees the same packing as C++ with no extra padding.
 layout(set = 0, binding = 0, std430) buffer ParticleBuffer {
     Particle particles[];
 } particleBuffer;
 
 layout(push_constant) uniform ComputeParams {
     float deltaTime;
-    float bounds;
+    float bounds;       // half-width of the simulation area
 } params;
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
 
-    // Minimal integration step used as the starting point for profiling experiments.
+    // Euler integration: position += velocity * dt.
     particleBuffer.particles[index].position.xyz +=
         particleBuffer.particles[index].velocity.xyz * params.deltaTime;
 
+    // Wrap-around: teleport particles that leave the right boundary
+    // back to the left side, keeping the simulation bounded.
     if (particleBuffer.particles[index].position.x > params.bounds) {
         particleBuffer.particles[index].position.x = -params.bounds;
     }

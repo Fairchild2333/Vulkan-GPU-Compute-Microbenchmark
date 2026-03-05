@@ -25,15 +25,22 @@ Current status:
 
 ```text
 .
-|- CMakeLists.txt
-|- src/
-|  |- main.cpp
-|- shaders/
-|  |- compute.comp
-|  |- particle.vert
-|  |- particle.frag
-|- scripts/
-|  |- compile_shaders.bat
+├── CMakeLists.txt          # Build config: C++ compilation, GLSL→SPIR-V, post-build copy
+├── README.md
+├── .gitignore
+├── src/
+│   └── main.cpp            # Vulkan app entry point – instance, device, swapchain,
+│                            #   graphics pipeline, compute pipeline, timestamp profiling
+├── shaders/
+│   ├── compute.comp        # Compute shader – per-particle Euler integration (SSBO + push constants)
+│   ├── particle.vert       # Vertex shader – positions particles as GL_POINT, velocity → colour
+│   └── particle.frag       # Fragment shader – outputs interpolated colour to framebuffer
+└── build/                  # (generated) CMake output
+    └── Release/
+        ├── vulkan_gpu_pipeline.exe
+        ├── compute.comp.spv    # Compiled SPIR-V (auto-copied by CMake post-build)
+        ├── particle.vert.spv
+        └── particle.frag.spv
 ```
 
 ## Prerequisites
@@ -58,7 +65,7 @@ glslc --version        # should print shaderc version
 ## Build (Windows)
 
 ```powershell
-# Configure (use vcpkg toolchain so CMake can find GLFW)
+# Configure (use vcpkg toolchain so CMake can find GLFW), only need run in first time
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
 
 # Compile (shaders are automatically compiled to SPIR-V)
@@ -94,13 +101,44 @@ By default the app prefers a discrete GPU. Use `--gpu <index>` to override:
 
 The index corresponds to the `[N]` shown in the GPU list at startup.
 
+## GPU Profiling
+
+The app uses Vulkan **timestamp queries** to measure GPU-side timings
+(separate from CPU frame time). Four timestamps are written per frame:
+
+| Index | Where | Pipeline stage |
+|-------|-------|----------------|
+| 0 | Before compute dispatch | `TOP_OF_PIPE` |
+| 1 | After compute dispatch | `COMPUTE_SHADER` |
+| 2 | Before render pass | `TOP_OF_PIPE` |
+| 3 | After render pass | `COLOR_ATTACHMENT_OUTPUT` |
+
+Every second the app prints an averaged summary to **stdout** and updates
+the window title:
+
+```
+[GPU Timing] Compute: 0.031 ms | Render: 0.054 ms | Total GPU: 0.112 ms | FPS: 3200
+```
+
+> **Note:** If the selected GPU queue family does not support timestamps
+> (timestampValidBits == 0), profiling is silently disabled and only FPS is
+> reported.
+
+### RenderDoc
+
+For deeper analysis, attach [RenderDoc](https://renderdoc.org/) to the
+executable and capture a frame. The tool will display per-draw-call timings,
+resource state, and shader debugging for both the compute and graphics passes.
+
 ## Next Milestones
 
-1. Add swapchain, render pass, and graphics pipeline creation.
-2. Add a minimal graphics pipeline and draw call (triangle or point cloud).
-3. Add storage buffers and compute pipeline for particle simulation.
-4. Add compute-to-graphics synchronisation (barriers + semaphores).
-5. Add timestamp queries and RenderDoc frame analysis notes.
+1. ~~Add swapchain, render pass, and graphics pipeline creation.~~
+2. ~~Add a minimal graphics pipeline and draw call (particle point cloud).~~
+3. ~~Add storage buffers and compute pipeline for particle simulation.~~
+4. ~~Add compute-to-graphics synchronisation (barriers + semaphores).~~
+5. ~~Add timestamp queries and GPU profiling.~~
+6. Add workgroup-size tuning experiments and analysis.
+7. Add RenderDoc frame-capture walkthrough documentation.
 
 ## Resume-Oriented Outcome Targets
 
