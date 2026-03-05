@@ -36,32 +36,63 @@ Current status:
 |  |- compile_shaders.bat
 ```
 
-## Build (Windows)
+## Prerequisites
 
-Prerequisites:
-- Vulkan SDK installed (`vulkaninfo` and `glslc` available in PATH)
-- CMake 3.20+
-- A C++17 compiler (MSVC or clang)
-- GLFW development package installed
+| Dependency | Install |
+|---|---|
+| **Vulkan SDK** | Download from [LunarG](https://vulkan.lunarg.com/sdk/home) and run the installer. This provides the Vulkan headers, libraries, `glslc` shader compiler, and validation layers. After installation, the `VULKAN_SDK` environment variable should be set automatically. |
+| **GLFW** | Install via [vcpkg](https://github.com/microsoft/vcpkg): `vcpkg install glfw3:x64-windows` |
+| **CMake 3.20+** | https://cmake.org/download/ |
+| **C++17 compiler** | MSVC (Visual Studio Build Tools) or Clang |
 
-Commands:
+Verify your environment:
 
 ```powershell
-cmake -S . -B build
+vulkaninfo --summary   # should list your GPU(s)
+glslc --version        # should print shaderc version
+```
+
+> **Note:** If `glslc` is not found after installing the Vulkan SDK, restart your
+> IDE / terminal so the updated `PATH` takes effect.
+
+## Build (Windows)
+
+```powershell
+# Configure (use vcpkg toolchain so CMake can find GLFW)
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+
+# Compile (shaders are automatically compiled to SPIR-V)
 cmake --build build --config Release
 ```
 
-Run:
+## Run
 
 ```powershell
 .\build\Release\vulkan_gpu_pipeline.exe
 ```
 
-Optional shader compile script:
+On startup the app lists every Vulkan-capable GPU and selects one:
+
+```
+Available GPUs:
+  [0] NVIDIA GeForce RTX 5090 (Discrete GPU)
+  [1] AMD Radeon(TM) Graphics (Integrated GPU)
+Selected GPU [0]: NVIDIA GeForce RTX 5090
+```
+
+### GPU Selection
+
+By default the app prefers a discrete GPU. Use `--gpu <index>` to override:
 
 ```powershell
-scripts\compile_shaders.bat
+# Use the NVIDIA discrete GPU (index 0)
+.\build\Release\vulkan_gpu_pipeline.exe --gpu 0
+
+# Use the AMD integrated GPU (index 1)
+.\build\Release\vulkan_gpu_pipeline.exe --gpu 1
 ```
+
+The index corresponds to the `[N]` shown in the GPU list at startup.
 
 ## Next Milestones
 

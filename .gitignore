@@ -21,9 +21,9 @@ Makefile
 # Shader binaries
 *.spv
 
-# Editor and AI tool folders
 .vscode/
 .claude/
+.cursor/
 
 # OS files
 .DS_Store

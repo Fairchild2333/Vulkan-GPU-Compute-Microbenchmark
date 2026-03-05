@@ -1,14 +1,18 @@
+#ifndef GLFW_INCLUDE_VULKAN
 #define GLFW_INCLUDE_VULKAN
+#endif
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -35,6 +39,8 @@ struct SwapChainSupportDetails {
 
 class VulkanApp {
 public:
+    explicit VulkanApp(std::int32_t gpuIndex = -1) : requestedGpuIndex_(gpuIndex) {}
+
     void Run() {
         InitWindow();
         InitVulkan();
@@ -43,6 +49,7 @@ public:
     }
 
 private:
+    std::int32_t requestedGpuIndex_ = -1;
     GLFWwindow* window_ = nullptr;
 
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -232,6 +239,16 @@ private:
         return indices.IsComplete() && extensionsSupported && swapChainAdequate;
     }
 
+    static const char* DeviceTypeName(VkPhysicalDeviceType type) {
+        switch (type) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   return "Discrete GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    return "Virtual GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:            return "CPU";
+            default:                                     return "Other";
+        }
+    }
+
     void PickPhysicalDevice() {
         std::uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr);
@@ -242,20 +259,52 @@ private:
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
 
-        for (const auto& device : devices) {
-            if (IsDeviceSuitable(device)) {
-                physicalDevice_ = device;
-                break;
+        std::vector<std::uint32_t> suitableIndices;
+        std::cout << "Available GPUs:\n";
+        for (std::uint32_t i = 0; i < deviceCount; ++i) {
+            VkPhysicalDeviceProperties props{};
+            vkGetPhysicalDeviceProperties(devices[i], &props);
+            const bool suitable = IsDeviceSuitable(devices[i]);
+            std::cout << "  [" << i << "] " << props.deviceName
+                      << " (" << DeviceTypeName(props.deviceType) << ")"
+                      << (suitable ? "" : " [unsuitable]") << '\n';
+            if (suitable) {
+                suitableIndices.push_back(i);
             }
         }
 
-        if (physicalDevice_ == VK_NULL_HANDLE) {
+        if (suitableIndices.empty()) {
             throw std::runtime_error("No suitable Vulkan physical device found");
         }
 
+        std::uint32_t chosen = suitableIndices[0];
+
+        if (requestedGpuIndex_ >= 0) {
+            const auto idx = static_cast<std::uint32_t>(requestedGpuIndex_);
+            if (idx >= deviceCount || !IsDeviceSuitable(devices[idx])) {
+                throw std::runtime_error("Requested GPU index " +
+                    std::to_string(requestedGpuIndex_) + " is out of range or unsuitable");
+            }
+            chosen = idx;
+        } else if (suitableIndices.size() == 1) {
+            chosen = suitableIndices[0];
+        } else {
+            std::cout << "Enter GPU index to use: ";
+            std::string line;
+            if (std::getline(std::cin, line) && !line.empty()) {
+                const auto idx = static_cast<std::uint32_t>(std::stoi(line));
+                if (idx >= deviceCount || !IsDeviceSuitable(devices[idx])) {
+                    throw std::runtime_error("GPU index " + line + " is out of range or unsuitable");
+                }
+                chosen = idx;
+            }
+        }
+
+        physicalDevice_ = devices[chosen];
+
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(physicalDevice_, &props);
-        std::cout << "Using GPU: " << props.deviceName << '\n';
+        std::cout << "Selected GPU [" << chosen << "]: " << props.deviceName << '\n';
     }
 
     void CreateLogicalDevice() {
@@ -699,9 +748,17 @@ private:
 
 }  // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
+    std::int32_t gpuIndex = -1;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--gpu") == 0 && i + 1 < argc) {
+            gpuIndex = std::stoi(argv[++i]);
+        }
+    }
+
     try {
-        VulkanApp app;
+        VulkanApp app(gpuIndex);
         app.Run();
     } catch (const std::exception& ex) {
         std::cerr << "Fatal error: " << ex.what() << '\n';
