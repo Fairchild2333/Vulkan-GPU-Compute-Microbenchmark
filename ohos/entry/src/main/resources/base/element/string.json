@@ -1,0 +1,22 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "GPU Compute Benchmark — Vulkan particle simulation"
+    },
+    {
+      "name": "ability_desc",
+      "value": "Main rendering ability"
+    },
+    {
+      "name": "ability_label",
+      "value": "GPU Benchmark"
+    }
+  ],
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#0A1424"
+    }
+  ]
+}
