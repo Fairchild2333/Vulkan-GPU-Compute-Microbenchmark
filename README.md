@@ -161,6 +161,48 @@ cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENAB
 The auto-selection prefers Metal on macOS, DX11 on Windows, then DX12,
 then Vulkan.
 
+### Benchmark Mode
+
+Run a fixed number of frames with V-Sync off, then output a standardised
+performance report for cross-GPU comparison:
+
+```bash
+# Default: 2000 measured frames (+ 100 warmup), V-Sync off
+./build/gpu_benchmark --benchmark
+
+# Custom frame count
+./build/gpu_benchmark --benchmark 5000
+
+# Normal mode with V-Sync enabled (capped to display refresh rate)
+./build/gpu_benchmark --vsync
+```
+
+Example output on Apple M4 Pro:
+
+```
+==========================================================
+                   GPU Benchmark Report
+==========================================================
+Backend:      Metal
+GPU:          Apple M4 Pro
+Resolution:   1280x720
+Particles:    65536
+V-Sync:       OFF
+Frames:       1000 (warmup: 100, measured: 1000)
+Duration:     3.348 s
+
+--- GPU Timing (ms) ---
+                     Avg       Min       Max
+Compute:         0.044     0.011     0.366
+Render:          0.760     0.251     2.777
+Total GPU:       1.711     0.265    10.975
+
+--- Throughput ---
+Avg FPS:    298
+Peak FPS:   43636
+==========================================================
+```
+
 ## GPU Profiling
 
 All four backends collect per-frame GPU timestamps:

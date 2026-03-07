@@ -42,8 +42,10 @@ struct MetalBackend::Impl {
 // Construction / destruction
 // -----------------------------------------------------------------------
 
-MetalBackend::MetalBackend(std::int32_t gpuIndex, std::string shaderDir)
-    : AppBase(gpuIndex, std::move(shaderDir)), impl_(std::make_unique<Impl>()) {}
+MetalBackend::MetalBackend(std::int32_t gpuIndex, std::string shaderDir,
+                           BenchmarkConfig config)
+    : AppBase(gpuIndex, std::move(shaderDir), config),
+      impl_(std::make_unique<Impl>()) {}
 
 MetalBackend::~MetalBackend() = default;
 
@@ -96,6 +98,7 @@ void MetalBackend::InitBackend() {
         impl_->metalLayer.pixelFormat  = MTLPixelFormatBGRA8Unorm;
         impl_->metalLayer.drawableSize = CGSizeMake(kWindowWidth, kWindowHeight);
         impl_->metalLayer.framebufferOnly = YES;
+        impl_->metalLayer.displaySyncEnabled = config_.vsync ? YES : NO;
 
         nsWindow.contentView.layer     = impl_->metalLayer;
         nsWindow.contentView.wantsLayer = YES;
@@ -176,7 +179,7 @@ void MetalBackend::InitBackend() {
         }
 
         // --- Particle buffer (shared memory — ideal for Apple Silicon) ----------
-        const NSUInteger bufSize = sizeof(Particle) * kParticleCount;
+        const NSUInteger bufSize = sizeof(Particle) * config_.particleCount;
         impl_->particleBuf =
             [impl_->device newBufferWithBytes:initialParticles_.data()
                                        length:bufSize
@@ -184,7 +187,7 @@ void MetalBackend::InitBackend() {
         if (!impl_->particleBuf)
             throw std::runtime_error("Failed to create particle buffer");
 
-        std::cout << "Created particle buffer: " << kParticleCount
+        std::cout << "Created particle buffer: " << config_.particleCount
                   << " particles\n";
         std::cout << "[Profiling] GPU command-buffer timestamps enabled\n";
     }
@@ -234,7 +237,7 @@ void MetalBackend::DrawFrame(float deltaTime) {
 
         const MTLSize tgSize  = MTLSizeMake(kComputeWorkGroupSize, 1, 1);
         const MTLSize tgCount = MTLSizeMake(
-            kParticleCount / kComputeWorkGroupSize, 1, 1);
+            config_.particleCount / kComputeWorkGroupSize, 1, 1);
         [computeEnc dispatchThreadgroups:tgCount
                    threadsPerThreadgroup:tgSize];
         [computeEnc endEncoding];
@@ -257,7 +260,7 @@ void MetalBackend::DrawFrame(float deltaTime) {
         [renderEnc setVertexBuffer:impl_->particleBuf offset:0 atIndex:0];
         [renderEnc drawPrimitives:MTLPrimitiveTypePoint
                       vertexStart:0
-                      vertexCount:kParticleCount];
+                      vertexCount:config_.particleCount];
         [renderEnc endEncoding];
 
         [renderCB presentDrawable:drawable];

@@ -1,9 +1,3 @@
-// Multi-backend GPU Compute & Rendering Pipeline
-//
-// Supports Vulkan, DX12, and DX11 backends selectable via --backend flag.
-// Each backend implements the same particle simulation (compute shader)
-// and point-cloud rendering (graphics pipeline) with GPU timestamp profiling.
-
 #include "app_base.h"
 
 #ifdef HAVE_VULKAN
@@ -62,16 +56,32 @@ int main(int argc, char* argv[]) {
 
     std::string backend = "auto";
     std::int32_t gpuIndex = -1;
+    gpu_bench::BenchmarkConfig benchCfg;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
             backend = argv[++i];
         } else if (std::strcmp(argv[i], "--gpu") == 0 && i + 1 < argc) {
             gpuIndex = std::stoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--vsync") == 0) {
+            benchCfg.vsync = true;
+        } else if (std::strcmp(argv[i], "--benchmark") == 0) {
+            benchCfg.benchmarkMode = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                benchCfg.benchFrames = static_cast<std::uint32_t>(
+                    std::stoi(argv[++i]));
+            }
+        } else if (std::strcmp(argv[i], "--particles") == 0 && i + 1 < argc) {
+            auto n = static_cast<std::uint32_t>(std::stoi(argv[++i]));
+            const std::uint32_t wg = gpu_bench::kComputeWorkGroupSize;
+            benchCfg.particleCount = ((n + wg - 1) / wg) * wg;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "  --backend <vulkan|dx12|dx11|metal>  Select rendering backend (default: auto)\n"
                       << "  --gpu <index>                       Select GPU by index\n"
+                      << "  --vsync                              Enable vertical sync (default: off)\n"
+                      << "  --particles <count>                 Particle count (default: 65536, rounded to 256)\n"
+                      << "  --benchmark [frames]                Run benchmark (default: 2000 frames), then exit\n"
                       << "  --help                              Show this help\n\n"
                       << "Available backends:";
 #ifdef HAVE_VULKAN
@@ -113,22 +123,26 @@ int main(int argc, char* argv[]) {
 
 #ifdef HAVE_VULKAN
         if (backend == "vulkan") {
-            app = std::make_unique<gpu_bench::VulkanBackend>(gpuIndex, shaderDir);
+            app = std::make_unique<gpu_bench::VulkanBackend>(
+                gpuIndex, shaderDir, benchCfg);
         }
 #endif
 #ifdef HAVE_DX12
         if (backend == "dx12") {
-            app = std::make_unique<gpu_bench::DX12Backend>(gpuIndex, shaderDir);
+            app = std::make_unique<gpu_bench::DX12Backend>(
+                gpuIndex, shaderDir, benchCfg);
         }
 #endif
 #ifdef HAVE_DX11
         if (backend == "dx11") {
-            app = std::make_unique<gpu_bench::DX11Backend>(gpuIndex, shaderDir);
+            app = std::make_unique<gpu_bench::DX11Backend>(
+                gpuIndex, shaderDir, benchCfg);
         }
 #endif
 #ifdef HAVE_METAL
         if (backend == "metal") {
-            app = std::make_unique<gpu_bench::MetalBackend>(gpuIndex, shaderDir);
+            app = std::make_unique<gpu_bench::MetalBackend>(
+                gpuIndex, shaderDir, benchCfg);
         }
 #endif
 
@@ -137,7 +151,13 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        std::cout << "Backend: " << app->GetBackendName() << '\n';
+        std::cout << "Backend: " << app->GetBackendName()
+                  << "  |  V-Sync: " << (benchCfg.vsync ? "ON" : "OFF")
+                  << "  |  Particles: " << benchCfg.particleCount;
+        if (benchCfg.benchmarkMode)
+            std::cout << "  |  Benchmark: " << benchCfg.benchFrames << " frames";
+        std::cout << '\n';
+
         app->Run();
     } catch (const std::exception& ex) {
         std::cout << "Fatal error: " << ex.what() << std::endl;

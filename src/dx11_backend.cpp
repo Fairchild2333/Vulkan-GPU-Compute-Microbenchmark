@@ -224,7 +224,7 @@ void DX11Backend::CreateShaders() {
 }
 
 void DX11Backend::CreateParticleBuffers() {
-    const UINT bufSize = sizeof(Particle) * kParticleCount;
+    const UINT bufSize = sizeof(Particle) * config_.particleCount;
 
     D3D11_SUBRESOURCE_DATA initData{};
     initData.pSysMem = initialParticles_.data();
@@ -242,7 +242,7 @@ void DX11Backend::CreateParticleBuffers() {
     // Create UAV for the structured buffer
     D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
     uavDesc.ViewDimension      = D3D11_UAV_DIMENSION_BUFFER;
-    uavDesc.Buffer.NumElements = kParticleCount;
+    uavDesc.Buffer.NumElements = config_.particleCount;
     ThrowIfFailed(device_->CreateUnorderedAccessView(
         computeBuffer_.Get(), &uavDesc, &computeUAV_),
         "CreateUnorderedAccessView failed");
@@ -255,7 +255,7 @@ void DX11Backend::CreateParticleBuffers() {
     ThrowIfFailed(device_->CreateBuffer(&vbd, &initData, &vertexBuffer_),
                   "CreateBuffer (vertex) failed");
 
-    std::cout << "Created particle buffers: " << kParticleCount << " particles\n";
+    std::cout << "Created particle buffers: " << config_.particleCount << " particles\n";
 }
 
 void DX11Backend::CreateComputeParamsCB() {
@@ -339,7 +339,7 @@ void DX11Backend::DrawFrame(float deltaTime) {
     context_->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
     ID3D11Buffer* cbs[] = { computeParamsCB_.Get() };
     context_->CSSetConstantBuffers(0, 1, cbs);
-    context_->Dispatch(kParticleCount / kComputeWorkGroupSize, 1, 1);
+    context_->Dispatch(config_.particleCount / kComputeWorkGroupSize, 1, 1);
 
     // Unbind UAV
     ID3D11UnorderedAccessView* nullUav[] = { nullptr };
@@ -373,7 +373,7 @@ void DX11Backend::DrawFrame(float deltaTime) {
 
     context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
     context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
-    context_->Draw(kParticleCount, 0);
+    context_->Draw(config_.particleCount, 0);
 
     if (timestampsSupported_)
         context_->End(timestampQueries_[slot][3].Get());
@@ -382,7 +382,7 @@ void DX11Backend::DrawFrame(float deltaTime) {
     if (timestampsSupported_)
         context_->End(disjointQueries_[slot].Get());
 
-    swapChain_->Present(1, 0);
+    swapChain_->Present(config_.vsync ? 1 : 0, 0);
 
     currentFrame_ = (currentFrame_ + 1) % kMaxFramesInFlight;
 }

@@ -2,7 +2,9 @@
 
 #include "gpu_common.h"
 
+#include <algorithm>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -12,7 +14,8 @@ namespace gpu_bench {
 
 class AppBase {
 public:
-    AppBase(std::int32_t gpuIndex, std::string shaderDir);
+    AppBase(std::int32_t gpuIndex, std::string shaderDir,
+            BenchmarkConfig config = {});
     virtual ~AppBase();
 
     AppBase(const AppBase&) = delete;
@@ -33,9 +36,10 @@ protected:
 
     static std::vector<char> ReadFileBytes(const std::string& filename);
 
-    std::int32_t requestedGpuIndex_;
-    std::string  shaderDir_;
-    GLFWwindow*  window_ = nullptr;
+    std::int32_t    requestedGpuIndex_;
+    std::string     shaderDir_;
+    BenchmarkConfig config_;
+    GLFWwindow*     window_ = nullptr;
     std::vector<Particle> initialParticles_;
 
 private:
@@ -43,6 +47,7 @@ private:
     void GenerateInitialParticles();
     void MainLoop();
     void ReportTimingIfDue(double deltaTime);
+    void PrintBenchmarkSummary() const;
     void CleanupWindow();
 
     double        lastFrameTime_      = 0.0;
@@ -52,6 +57,24 @@ private:
     std::uint32_t timingSampleCount_  = 0;
     double        timingReportTimer_  = 0.0;
     std::uint32_t frameCount_         = 0;
+
+    std::uint32_t totalFrameCount_    = 0;
+
+    double benchMinComputeMs_  = std::numeric_limits<double>::max();
+    double benchMaxComputeMs_  = 0.0;
+    double benchMinRenderMs_   = std::numeric_limits<double>::max();
+    double benchMaxRenderMs_   = 0.0;
+    double benchMinTotalGpuMs_ = std::numeric_limits<double>::max();
+    double benchMaxTotalGpuMs_ = 0.0;
+    double benchSumComputeMs_  = 0.0;
+    double benchSumRenderMs_   = 0.0;
+    double benchSumTotalGpuMs_ = 0.0;
+    std::uint32_t benchSampleCount_ = 0;
+
+    double benchStartTime_     = 0.0;
+    double benchEndTime_       = 0.0;
+    std::uint32_t benchMeasuredFrames_ = 0;
+    double benchMinFrameTime_  = std::numeric_limits<double>::max();
 };
 
 }  // namespace gpu_bench

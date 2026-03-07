@@ -349,7 +349,7 @@ void DX12Backend::CreatePipelineStates() {
 // -----------------------------------------------------------------------
 
 void DX12Backend::CreateParticleBuffer() {
-    const UINT bufferSize = sizeof(Particle) * kParticleCount;
+    const UINT bufferSize = sizeof(Particle) * config_.particleCount;
 
     // Default heap buffer (GPU-only, UAV-capable)
     D3D12_HEAP_PROPERTIES defaultHeap{};
@@ -411,7 +411,7 @@ void DX12Backend::CreateParticleBuffer() {
     // Create UAV descriptor for compute
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
     uavDesc.ViewDimension              = D3D12_UAV_DIMENSION_BUFFER;
-    uavDesc.Buffer.NumElements         = kParticleCount;
+    uavDesc.Buffer.NumElements         = config_.particleCount;
     uavDesc.Buffer.StructureByteStride = sizeof(Particle);
     device_->CreateUnorderedAccessView(particleBuffer_.Get(), nullptr, &uavDesc,
                                        cbvSrvUavHeap_->GetCPUDescriptorHandleForHeapStart());
@@ -421,7 +421,7 @@ void DX12Backend::CreateParticleBuffer() {
     vbView_.SizeInBytes    = bufferSize;
     vbView_.StrideInBytes  = sizeof(Particle);
 
-    std::cout << "Created particle buffer: " << kParticleCount << " particles\n";
+    std::cout << "Created particle buffer: " << config_.particleCount << " particles\n";
 }
 
 void DX12Backend::CreateTimestampResources() {
@@ -547,7 +547,7 @@ void DX12Backend::DrawFrame(float deltaTime) {
 
     ComputeParams params{ deltaTime, 0.9f };
     commandList_->SetComputeRoot32BitConstants(1, 2, &params, 0);
-    commandList_->Dispatch(kParticleCount / kComputeWorkGroupSize, 1, 1);
+    commandList_->Dispatch(config_.particleCount / kComputeWorkGroupSize, 1, 1);
 
     if (timestampsSupported_)
         commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 1);
@@ -590,7 +590,7 @@ void DX12Backend::DrawFrame(float deltaTime) {
     commandList_->SetPipelineState(graphicsPSO_.Get());
     commandList_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
     commandList_->IASetVertexBuffers(0, 1, &vbView_);
-    commandList_->DrawInstanced(kParticleCount, 1, 0, 0);
+    commandList_->DrawInstanced(config_.particleCount, 1, 0, 0);
 
     if (timestampsSupported_)
         commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 3);
@@ -613,7 +613,7 @@ void DX12Backend::DrawFrame(float deltaTime) {
     ID3D12CommandList* lists[] = { commandList_.Get() };
     commandQueue_->ExecuteCommandLists(1, lists);
 
-    swapChain_->Present(1, 0);
+    swapChain_->Present(config_.vsync ? 1 : 0, 0);
 
     // Signal fence for this frame
     commandQueue_->Signal(fence_.Get(), nextFenceValue_);

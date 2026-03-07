@@ -21,4 +21,12 @@ struct ComputeParams {
     float bounds;
 };
 
+struct BenchmarkConfig {
+    bool          vsync         = false;
+    bool          benchmarkMode = false;
+    std::uint32_t benchFrames   = 2000;
+    std::uint32_t warmupFrames  = 100;
+    std::uint32_t particleCount = kParticleCount;
+};
+
 }  // namespace gpu_bench

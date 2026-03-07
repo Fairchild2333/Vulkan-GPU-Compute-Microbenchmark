@@ -10,7 +10,8 @@ namespace gpu_bench {
 
 class MetalBackend : public AppBase {
 public:
-    MetalBackend(std::int32_t gpuIndex, std::string shaderDir);
+    MetalBackend(std::int32_t gpuIndex, std::string shaderDir,
+                 BenchmarkConfig config = {});
     ~MetalBackend() override;
 
     MetalBackend(const MetalBackend&) = delete;

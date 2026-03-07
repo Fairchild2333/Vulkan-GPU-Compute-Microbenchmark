@@ -244,7 +244,7 @@ std::uint32_t VulkanBackend::FindMemoryType(std::uint32_t filter, VkMemoryProper
 }
 
 void VulkanBackend::CreateParticleBuffer() {
-    const VkDeviceSize size = sizeof(Particle) * kParticleCount;
+    const VkDeviceSize size = sizeof(Particle) * config_.particleCount;
 
     VkBufferCreateInfo bi{};
     bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -272,7 +272,7 @@ void VulkanBackend::CreateParticleBuffer() {
     std::memcpy(data, initialParticles_.data(), static_cast<std::size_t>(size));
     vkUnmapMemory(device_, particleBufferMemory_);
 
-    std::cout << "Created particle buffer: " << kParticleCount << " particles\n";
+    std::cout << "Created particle buffer: " << config_.particleCount << " particles\n";
 }
 
 // -----------------------------------------------------------------------
@@ -290,8 +290,15 @@ VkSurfaceFormatKHR VulkanBackend::ChooseSwapSurfaceFormat(
 
 VkPresentModeKHR VulkanBackend::ChooseSwapPresentMode(
         const std::vector<VkPresentModeKHR>& available) const {
-    for (auto m : available)
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    if (!config_.vsync) {
+        for (auto m : available)
+            if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) return m;
+        for (auto m : available)
+            if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    } else {
+        for (auto m : available)
+            if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    }
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -698,7 +705,7 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     ComputeParams params{ deltaTime, 0.9f };
     vkCmdPushConstants(cmd, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(ComputeParams), &params);
-    vkCmdDispatch(cmd, kParticleCount / kComputeWorkGroupSize, 1, 1);
+    vkCmdDispatch(cmd, config_.particleCount / kComputeWorkGroupSize, 1, 1);
 
     if (timestampsSupported_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, tsBase + 1);
@@ -732,7 +739,7 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     VkBuffer     bufs[] = { particleBuffer_ };
     VkDeviceSize offs[] = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, bufs, offs);
-    vkCmdDraw(cmd, kParticleCount, 1, 0, 0);
+    vkCmdDraw(cmd, config_.particleCount, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
 
     if (timestampsSupported_)
