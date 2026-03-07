@@ -15,6 +15,9 @@
 #ifdef HAVE_DX11
 #include "dx11_backend.h"
 #endif
+#ifdef HAVE_METAL
+#include "metal_backend.h"
+#endif
 
 #include <cstring>
 #include <iostream>
@@ -67,9 +70,9 @@ int main(int argc, char* argv[]) {
             gpuIndex = std::stoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
-                      << "  --backend <vulkan|dx12|dx11>  Select rendering backend (default: auto)\n"
-                      << "  --gpu <index>                 Select GPU by index\n"
-                      << "  --help                        Show this help\n\n"
+                      << "  --backend <vulkan|dx12|dx11|metal>  Select rendering backend (default: auto)\n"
+                      << "  --gpu <index>                       Select GPU by index\n"
+                      << "  --help                              Show this help\n\n"
                       << "Available backends:";
 #ifdef HAVE_VULKAN
             std::cout << " vulkan";
@@ -80,6 +83,9 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_DX11
             std::cout << " dx11";
 #endif
+#ifdef HAVE_METAL
+            std::cout << " metal";
+#endif
             std::cout << '\n';
             return 0;
         }
@@ -88,7 +94,9 @@ int main(int argc, char* argv[]) {
     const std::string shaderDir = ExeDirectory(argv[0]);
 
     if (backend == "auto") {
-#ifdef HAVE_DX11
+#ifdef HAVE_METAL
+        backend = "metal";
+#elif defined(HAVE_DX11)
         backend = "dx11";
 #elif defined(HAVE_DX12)
         backend = "dx12";
@@ -116,6 +124,11 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_DX11
         if (backend == "dx11") {
             app = std::make_unique<gpu_bench::DX11Backend>(gpuIndex, shaderDir);
+        }
+#endif
+#ifdef HAVE_METAL
+        if (backend == "metal") {
+            app = std::make_unique<gpu_bench::MetalBackend>(gpuIndex, shaderDir);
         }
 #endif
 

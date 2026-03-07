@@ -1,10 +1,10 @@
 # GPU Compute & Rendering Pipeline — Multi-Backend
 
-A real-time particle simulation using GPU compute shaders with three
-interchangeable rendering backends: **Vulkan**, **DirectX 12**, and
-**DirectX 11**. Each backend implements the same particle physics (Euler
-integration in a compute shader) and point-cloud rendering, with GPU
-timestamp profiling.
+A real-time particle simulation using GPU compute shaders with four
+interchangeable rendering backends: **Vulkan**, **DirectX 12**,
+**DirectX 11**, and **Metal**. Each backend implements the same particle
+physics (Euler integration in a compute shader) and point-cloud rendering,
+with GPU timestamp profiling.
 
 ## Supported Backends
 
@@ -13,6 +13,7 @@ timestamp profiling.
 | Vulkan  | 1.2       | Windows, Linux, **HarmonyOS** | Requires Vulkan SDK + ICD driver |
 | DX12    | Feature Level 11_0 | Windows 10+ | Best compatibility on Windows on ARM |
 | DX11    | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
+| Metal   | Metal 2+  | **macOS** (Apple Silicon / Intel) | Native Apple GPU API |
 
 ### HarmonyOS PC
 
@@ -32,14 +33,16 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 │   ├── app_base.cpp
 │   ├── vulkan_backend.h/cpp  # Vulkan backend
 │   ├── dx12_backend.h/cpp    # DirectX 12 backend
-│   └── dx11_backend.h/cpp    # DirectX 11 backend
+│   ├── dx11_backend.h/cpp    # DirectX 11 backend
+│   └── metal_backend.h/mm   # Metal backend (Objective-C++)
 ├── shaders/
 │   ├── compute.comp          # Vulkan GLSL compute shader
 │   ├── particle.vert         # Vulkan GLSL vertex shader
 │   ├── particle.frag         # Vulkan GLSL fragment shader
 │   ├── compute.hlsl          # DX12/DX11 compute shader
 │   ├── particle_vs.hlsl      # DX12/DX11 vertex shader
-│   └── particle_ps.hlsl      # DX12/DX11 pixel shader
+│   ├── particle_ps.hlsl      # DX12/DX11 pixel shader
+│   └── particle.metal        # Metal compute + vertex + fragment
 └── build/
 ```
 
@@ -48,10 +51,11 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 | Dependency | Install |
 |---|---|
 | **CMake 3.20+** | https://cmake.org/download/ |
-| **C++17 compiler** | MSVC (Visual Studio 2019+) or Clang |
-| **GLFW** | `vcpkg install glfw3` (with appropriate triplet) |
+| **C++17 compiler** | MSVC (Visual Studio 2019+), Clang, or Apple Clang |
+| **GLFW** | `vcpkg install glfw3` or `brew install glfw` |
 | **Vulkan SDK** (optional) | [LunarG](https://vulkan.lunarg.com/sdk/home) |
 | **Windows SDK** (for DX) | Included with Visual Studio |
+| **Xcode CLT** (for Metal) | `xcode-select --install` (macOS) |
 
 ### Windows on ARM
 
@@ -63,13 +67,22 @@ The DX12 and DX11 backends only need the Windows SDK (bundled with Visual
 Studio). No additional driver installation is needed — D3D12/D3D11 work
 through the built-in Windows graphics stack.
 
+### macOS (Apple Silicon / Intel)
+
+```bash
+brew install glfw cmake
+```
+
+The Metal backend uses the system Metal framework — no additional SDK or
+driver installation is needed.
+
 ## Build
 
-### Verify Environment Variables
+### Verify Environment (Windows)
 
-Before building, ensure that `cmake`, `cl` (MSVC compiler), and `glslc`
-(Vulkan shader compiler — optional) are available in your system or user
-**PATH** environment variable. You can quickly verify in PowerShell:
+Before building on Windows, ensure that `cmake`, `cl` (MSVC compiler), and
+`glslc` (Vulkan shader compiler — optional) are available in your PATH.
+Verify in PowerShell:
 
 ```powershell
 cmake --version   # Should be 3.20+
@@ -77,9 +90,7 @@ cl                # Should print MSVC version information
 glslc --version   # Optional — only required for the Vulkan backend
 ```
 
-If any of these commands are not recognised, the corresponding tool is not
-in your PATH. Typical default paths are listed below (using Visual Studio
-2026 Community on ARM64 as an example — adjust to match your installation):
+Typical default paths (Visual Studio 2026 Community on ARM64 as an example):
 
 | Tool | Default Path |
 |------|-------------|
@@ -90,7 +101,16 @@ in your PATH. Typical default paths are listed below (using Visual Studio
 Add the relevant directories to **User environment variables → Path**, then
 reopen your terminal for the changes to take effect.
 
-### Build Steps
+### Verify Environment (macOS)
+
+```bash
+cmake --version   # Should be 3.20+
+clang --version   # Apple Clang (comes with Xcode Command Line Tools)
+```
+
+If `cmake` is not found, install it via Homebrew: `brew install cmake`.
+
+### Build Steps (Windows)
 
 ```powershell
 # Configure (vcpkg toolchain, all backends auto-detected)
@@ -103,36 +123,54 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.c
 cmake --build build --config Release
 ```
 
+### Build Steps (macOS)
+
+```bash
+# Configure (Metal backend auto-detected on macOS)
+cmake -S . -B build
+
+# Build
+cmake --build build --config Release
+```
+
 ### Backend Toggles
 
-```powershell
-cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON ...
+```bash
+cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENABLE_METAL=OFF ...
 ```
 
 ## Run
 
-```powershell
+```bash
+# Windows
 .\build\Release\gpu_benchmark.exe                    # auto-select backend
 .\build\Release\gpu_benchmark.exe --backend vulkan    # force Vulkan
 .\build\Release\gpu_benchmark.exe --backend dx12      # force DX12
 .\build\Release\gpu_benchmark.exe --backend dx11      # force DX11
 .\build\Release\gpu_benchmark.exe --backend dx12 --gpu 1   # DX12 + specific GPU
-.\build\Release\gpu_benchmark.exe --help
+
+# macOS
+./build/gpu_benchmark                                # auto-selects Metal
+./build/gpu_benchmark --backend metal                # force Metal
+./build/gpu_benchmark --backend vulkan               # force Vulkan (needs MoltenVK)
+
+# Help
+./build/gpu_benchmark --help
 ```
 
-The auto-selection prefers DX12 on Windows (best WoA compatibility),
-falls back to DX11, then Vulkan.
+The auto-selection prefers Metal on macOS, DX11 on Windows, then DX12,
+then Vulkan.
 
 ## GPU Profiling
 
-All three backends write 4 timestamps per frame:
+All four backends collect per-frame GPU timestamps:
 
-| Index | Where | Stage |
-|-------|-------|-------|
-| 0 | Before compute dispatch | Pipeline start |
-| 1 | After compute dispatch | Compute complete |
-| 2 | Before render pass | Pipeline start |
-| 3 | After render pass | Render complete |
+| Backend | Mechanism |
+|---------|-----------|
+| Vulkan  | `vkCmdWriteTimestamp` query pool (4 timestamps per frame) |
+| DX12    | `ID3D12GraphicsCommandList::EndQuery` timestamp heap |
+| DX11    | `ID3D11Query` with `D3D11_QUERY_TIMESTAMP` |
+| Metal   | `MTLCommandBuffer.GPUStartTime` / `GPUEndTime` on separate compute & render command buffers |
 
 Every second the application prints averaged timing to stdout:
 
@@ -140,18 +178,26 @@ Every second the application prints averaged timing to stdout:
 [GPU Timing] Compute: 0.031 ms | Render: 0.054 ms | Total GPU: 0.112 ms | FPS: 3200
 ```
 
+### Metal Performance HUD (macOS)
+
+Enable Apple's built-in Metal performance overlay for real-time GPU metrics:
+
+```bash
+MTL_HUD_ENABLED=1 ./build/gpu_benchmark --backend metal
+```
+
 ## Architecture
 
 ```
-         ┌──────────┐
-         │ AppBase  │  window, particles, timing
-         └────┬─────┘
-      ┌───────┼───────┐
-      │       │       │
-┌─────┴──┐ ┌──┴───┐ ┌─┴──────┐
-│ Vulkan │ │ DX12 │ │  DX11  │
-│Backend │ │Backend│ │Backend │
-└────────┘ └──────┘ └────────┘
+            ┌──────────┐
+            │ AppBase  │  window, particles, timing
+            └────┬─────┘
+      ┌──────┬───┴───┬───────┐
+      │      │       │       │
+┌─────┴──┐ ┌┴────┐ ┌┴─────┐ ┌┴─────┐
+│ Vulkan │ │ DX12│ │ DX11 │ │Metal │
+│Backend │ │Back.│ │Back. │ │Back. │
+└────────┘ └─────┘ └──────┘ └──────┘
 ```
 
 Each backend overrides:

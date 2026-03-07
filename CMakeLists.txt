@@ -7,8 +7,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---- Options ----
 option(ENABLE_VULKAN "Build with Vulkan backend" ON)
-option(ENABLE_DX12   "Build with DirectX 12 backend (Windows only)" WIN32)
-option(ENABLE_DX11   "Build with DirectX 11 backend (Windows only)" WIN32)
+if(WIN32)
+    option(ENABLE_DX12  "Build with DirectX 12 backend (Windows only)" ON)
+    option(ENABLE_DX11  "Build with DirectX 11 backend (Windows only)" ON)
+else()
+    option(ENABLE_DX12  "Build with DirectX 12 backend (Windows only)" OFF)
+    option(ENABLE_DX11  "Build with DirectX 11 backend (Windows only)" OFF)
+endif()
+if(APPLE)
+    option(ENABLE_METAL "Build with Metal backend (macOS only)" ON)
+else()
+    option(ENABLE_METAL "Build with Metal backend (macOS only)" OFF)
+endif()
 
 # ---- GLFW (required by all backends for windowing) ----
 find_package(glfw3 REQUIRED)
@@ -62,6 +72,36 @@ else()
     message(STATUS "DX11 backend:   DISABLED (by option)")
 endif()
 
+# ---- Metal backend (macOS only) ----
+if(ENABLE_METAL AND APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 17)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+
+    find_library(METAL_FRAMEWORK Metal)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore)
+    find_library(COCOA_FRAMEWORK Cocoa)
+
+    if(METAL_FRAMEWORK)
+        list(APPEND BACKEND_SOURCES src/metal_backend.mm)
+        list(APPEND BACKEND_LIBS
+            ${METAL_FRAMEWORK} ${QUARTZCORE_FRAMEWORK} ${COCOA_FRAMEWORK})
+        list(APPEND BACKEND_DEFS HAVE_METAL)
+
+        set_source_files_properties(src/metal_backend.mm PROPERTIES
+            COMPILE_FLAGS "-fobjc-arc"
+        )
+
+        message(STATUS "Metal backend:  ENABLED")
+    else()
+        message(STATUS "Metal backend:  DISABLED (Metal framework not found)")
+    endif()
+elseif(ENABLE_METAL AND NOT APPLE)
+    message(STATUS "Metal backend:  DISABLED (not macOS)")
+else()
+    message(STATUS "Metal backend:  DISABLED (by option)")
+endif()
+
 # ---- Executable ----
 add_executable(gpu_benchmark ${COMMON_SOURCES} ${BACKEND_SOURCES})
 
@@ -71,7 +111,10 @@ target_compile_definitions(gpu_benchmark PRIVATE ${BACKEND_DEFS})
 if(MSVC)
     target_compile_options(gpu_benchmark PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(gpu_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(gpu_benchmark PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-Wall -Wextra>
+    )
 endif()
 
 # ---- Shader compilation: GLSL -> SPIR-V (Vulkan) ----
@@ -118,5 +161,15 @@ if((ENABLE_DX12 AND WIN32) OR (ENABLE_DX11 AND WIN32))
     add_custom_command(TARGET gpu_benchmark POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HLSL_SOURCES} $<TARGET_FILE_DIR:gpu_benchmark>
         COMMENT "Copying HLSL shader files next to executable"
+    )
+endif()
+
+# ---- Copy Metal shader source file next to executable (macOS) ----
+if(ENABLE_METAL AND APPLE AND METAL_FRAMEWORK)
+    add_custom_command(TARGET gpu_benchmark POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/shaders/particle.metal
+            $<TARGET_FILE_DIR:gpu_benchmark>
+        COMMENT "Copying Metal shader file next to executable"
     )
 endif()
