@@ -5,7 +5,7 @@
 #include "app_base.h"
 
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_5.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
@@ -65,12 +65,16 @@ private:
     ComPtr<ID3D11BlendState>       blendState_;
     ComPtr<ID3D11RasterizerState>  rasterizerState_;
 
-    // Timestamp queries (double-buffered)
+    // Timestamp queries -- deeper ring buffer so slow GPUs have time to finish
     static constexpr UINT kTimestampsPerFrame = 4;
-    ComPtr<ID3D11Query> disjointQueries_[kMaxFramesInFlight];
-    ComPtr<ID3D11Query> timestampQueries_[kMaxFramesInFlight][kTimestampsPerFrame];
-    bool timestampsSupported_ = false;
-    std::uint32_t currentFrame_ = 0;
+    static constexpr UINT kTimestampSlotCount = 8;
+    ComPtr<ID3D11Query> disjointQueries_[kTimestampSlotCount];
+    ComPtr<ID3D11Query> timestampQueries_[kTimestampSlotCount][kTimestampsPerFrame];
+    bool timestampsSupported_    = false;
+    bool tearingSupported_       = false;
+    bool timestampDiagPrinted_   = false;
+    UINT timestampFrameCount_    = 0;
+    std::uint32_t currentFrame_  = 0;
 };
 
 }  // namespace gpu_bench

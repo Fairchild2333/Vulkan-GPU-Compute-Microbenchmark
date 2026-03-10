@@ -141,14 +141,16 @@ cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENAB
 
 ## Run
 
-```bash
-# Windows
-.\build\Release\gpu_benchmark.exe                    # auto-select backend
-.\build\Release\gpu_benchmark.exe --backend vulkan    # force Vulkan
-.\build\Release\gpu_benchmark.exe --backend dx12      # force DX12
-.\build\Release\gpu_benchmark.exe --backend dx11      # force DX11
+```powershell
+# Windows (PowerShell)
+.\build\Release\gpu_benchmark.exe                         # auto-select backend
+.\build\Release\gpu_benchmark.exe --backend vulkan         # force Vulkan
+.\build\Release\gpu_benchmark.exe --backend dx12           # force DX12
+.\build\Release\gpu_benchmark.exe --backend dx11           # force DX11
 .\build\Release\gpu_benchmark.exe --backend dx12 --gpu 1   # DX12 + specific GPU
+```
 
+```bash
 # macOS
 ./build/gpu_benchmark                                # auto-selects Metal
 ./build/gpu_benchmark --backend metal                # force Metal
@@ -158,22 +160,57 @@ cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENAB
 ./build/gpu_benchmark --help
 ```
 
-The auto-selection prefers Metal on macOS, DX11 on Windows, then DX12,
-then Vulkan.
+### Backend Auto-Selection
+
+When no `--backend` is specified, the application probes backends in order
+and falls back to the next if the current one fails to initialise:
+
+**macOS:** Metal → Vulkan
+**Windows:** Vulkan → DX12 → DX11
+
+Each fallback is logged to the terminal:
+
+```
+[Backend] Trying vulkan...
+[Backend] vulkan not available: No Vulkan physical device found
+[Backend] Trying dx12...
+[Backend] Using dx12
+```
+
+### Multi-GPU Selection
+
+On systems with multiple GPUs, the application lists all detected hardware
+adapters (deduplicated by LUID on DirectX backends) and prompts for
+selection if `--gpu` is not specified:
+
+```
+Available GPUs:
+  [0] NVIDIA GeForce RTX 5090 (Hardware)  VRAM: 32480 MB
+  [1] AMD Radeon(TM) Graphics (Hardware)  VRAM: 512 MB
+Multiple hardware GPUs detected. Default: [0]
+Enter GPU index to use (or press Enter for default):
+```
 
 ### Benchmark Mode
 
 Run a fixed number of frames with V-Sync off, then output a standardised
 performance report for cross-GPU comparison:
 
-```bash
-# Default: 2000 measured frames (+ 100 warmup), V-Sync off
-./build/gpu_benchmark --benchmark
+```powershell
+# Windows — default: 2000 measured frames (+ 100 warmup), V-Sync off
+.\build\Release\gpu_benchmark.exe --benchmark
 
 # Custom frame count
-./build/gpu_benchmark --benchmark 5000
+.\build\Release\gpu_benchmark.exe --benchmark 5000
 
 # Normal mode with V-Sync enabled (capped to display refresh rate)
+.\build\Release\gpu_benchmark.exe --vsync
+```
+
+```bash
+# macOS / Linux
+./build/gpu_benchmark --benchmark
+./build/gpu_benchmark --benchmark 5000
 ./build/gpu_benchmark --vsync
 ```
 
@@ -261,6 +298,22 @@ Each backend overrides:
 
 ### In Progress / Planned
 
+#### Benchmark Result History
+
+Persist benchmark results to a local JSON file so users can track and compare
+performance over time:
+
+- **Auto-save** — after each benchmark run, append the full summary (API,
+  GPU, CPU, particle count, difficulty, timing breakdown, FPS) to
+  `~/.gpu_bench/results.json`.
+- **List results** — `--results` flag prints a table of all saved runs,
+  sorted by date, with key metrics (API, GPU, difficulty, Avg FPS, Avg GPU
+  time).
+- **Delete results** — `--results-delete <id>` removes a specific entry;
+  `--results-clear` wipes the entire history.
+- **Export** — `--results-export <path>` writes the history to a
+  user-specified CSV or JSON file for external analysis.
+
 #### Web Backend — WebGL / WebGPU
 
 Browser-based port of the particle benchmark, inspired by projects such as
@@ -272,6 +325,21 @@ Browser-based port of the particle benchmark, inspired by projects such as
   drivers or SDKs.
 - Cross-platform, cross-system league table comparing results from native
   backends (Vulkan / DX / Metal) against web backends on the same hardware.
+
+#### OpenGL 4.3 Backend
+
+Add an OpenGL compute-shader backend to complement the existing API coverage:
+
+- **OpenGL 4.3+** with `GL_ARB_compute_shader` for particle simulation and
+  traditional vertex/fragment rendering for display.
+- Compute dispatch via `glDispatchCompute`, particle SSBO shared between
+  compute and draw passes.
+- GPU timestamp queries using `GL_ARB_timer_query` (`glQueryCounter` /
+  `glGetQueryObjectui64v`).
+- Cross-platform support: runs on Windows, Linux, and macOS (legacy profile)
+  without requiring Vulkan or DirectX drivers.
+- Enables direct comparison of OpenGL's implicit driver model against DX11
+  (similar overhead profile) and against explicit APIs (Vulkan / DX12).
 
 #### Cross-Platform & Cross-GPU Performance Comparison
 
@@ -341,6 +409,27 @@ standard GPU profiling tools:
 - Identifying pipeline bubbles or redundant barriers.
 - Annotated screenshots with explanations.
 
+#### Multi-Draw-Call Stress Test
+
+The current benchmark issues a single compute dispatch and a single draw call
+per frame — a workload profile that favours DX11's highly optimised implicit
+driver path over DX12/Vulkan's explicit model (see
+[`docs/benchmark-report.md`](docs/benchmark-report.md) for measured data).
+
+To demonstrate the scalability advantage of explicit APIs, add an optional
+**multi-draw-call mode**:
+
+- Render particles in batches (e.g. 1 draw call per 1 024 particles), producing
+  1 000+ draw calls per frame at default particle counts.
+- Record draw commands across **4–8 threads** on DX12 (secondary command lists)
+  and Vulkan (secondary command buffers), then submit in a single primary.
+- Compare single-threaded vs multi-threaded CPU submission time per API.
+- Expected outcome: DX12/Vulkan overtake DX11 when draw-call count is high
+  enough for the driver's single-threaded path to become the bottleneck.
+
+This will complete the cross-API analysis by showing both sides of the
+implicit-vs-explicit trade-off.
+
 #### Advanced Particle Interactions
 
 Extend the compute shader to support richer physics:
@@ -352,4 +441,26 @@ Extend the compute shader to support richer physics:
 
 This demonstrates more complex compute shader design, including shared-memory
 optimisation and synchronisation within workgroups.
+
+#### HIP / ROCm Headless Compute Backend
+
+Add a headless (no rendering) compute benchmark using AMD's
+[HIP](https://github.com/ROCm/HIP) runtime:
+
+- Port the particle-update kernel from GLSL/HLSL to a HIP kernel.
+- Time kernel dispatch with `hipEvent` and output the same standardised
+  benchmark report as the graphics backends.
+- Compare HIP kernel throughput against Vulkan/DX compute shader dispatch on
+  identical AMD hardware.
+- HIP compiles for both AMD (ROCm) and NVIDIA (CUDA back-end) GPUs, so the
+  same source covers both vendors.
+
+#### CUDA Headless Compute Backend
+
+Equivalent headless compute benchmark targeting NVIDIA GPUs natively:
+
+- Port the particle-update kernel to a CUDA kernel (`.cu`).
+- Time with `cudaEvent` and produce the same report format.
+- Compare CUDA kernel throughput against Vulkan compute and the HIP path on
+  NVIDIA hardware.
 ·

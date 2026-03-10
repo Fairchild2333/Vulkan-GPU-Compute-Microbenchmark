@@ -82,6 +82,7 @@ private:
     std::array<VkSemaphore, kMaxFramesInFlight> imageAvailableSemaphores_{};
     std::array<VkSemaphore, kMaxFramesInFlight> renderFinishedSemaphores_{};
     std::array<VkFence,     kMaxFramesInFlight> inFlightFences_{};
+    std::vector<VkFence>                        imagesInFlight_;
     std::uint32_t currentFrame_ = 0;
 
     static constexpr std::uint32_t kTimestampsPerFrame = 4;

@@ -47,16 +47,18 @@ private:
     void GenerateInitialParticles();
     void MainLoop();
     void ReportTimingIfDue(double deltaTime);
-    void PrintBenchmarkSummary() const;
+    void PrintSummary() const;
     void CleanupWindow();
 
     double        lastFrameTime_      = 0.0;
+    double        runStartTime_       = 0.0;
     double        accumComputeMs_     = 0.0;
     double        accumRenderMs_      = 0.0;
     double        accumTotalGpuMs_    = 0.0;
     std::uint32_t timingSampleCount_  = 0;
     double        timingReportTimer_  = 0.0;
     std::uint32_t frameCount_         = 0;
+    bool          warmupDone_         = false;
 
     std::uint32_t totalFrameCount_    = 0;
 

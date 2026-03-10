@@ -6,11 +6,14 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+#include <cstdint>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -69,6 +72,8 @@ void DX12Backend::InitBackend() {
     CreateRenderTargets();
     std::cout << "[DX12 Init] Creating command allocators..." << std::endl;
     CreateCommandAllocatorsAndList();
+    std::cout << "[DX12 Init] Creating fence..." << std::endl;
+    CreateFence();
     std::cout << "[DX12 Init] Creating root signatures..." << std::endl;
     CreateRootSignatures();
     std::cout << "[DX12 Init] Creating pipeline states (compiling shaders)..." << std::endl;
@@ -77,13 +82,25 @@ void DX12Backend::InitBackend() {
     CreateParticleBuffer();
     std::cout << "[DX12 Init] Creating timestamp resources..." << std::endl;
     CreateTimestampResources();
-    std::cout << "[DX12 Init] Creating fence..." << std::endl;
-    CreateFence();
     std::cout << "[DX12 Init] Initialisation complete." << std::endl;
 }
 
 void DX12Backend::CreateDevice() {
     ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&factory_)), "CreateDXGIFactory1 failed");
+
+    // Sentinel -2: WARP software renderer requested from main.cpp.
+    if (requestedGpuIndex_ == -2) {
+        std::cout << "[DX12] Using Microsoft WARP software renderer (CPU)." << std::endl;
+        ComPtr<IDXGIAdapter> warpAdapter;
+        ThrowIfFailed(factory_->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)),
+                      "EnumWarpAdapter failed");
+        ThrowIfFailed(D3D12CreateDevice(warpAdapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                                        IID_PPV_ARGS(&device_)),
+                      "D3D12CreateDevice (WARP) failed");
+        deviceName_ = "Microsoft WARP (CPU Software Renderer)";
+        std::cout << "Selected GPU: " << deviceName_ << std::endl;
+        return;
+    }
 
     static const D3D_FEATURE_LEVEL kFeatureLevels[] = {
         D3D_FEATURE_LEVEL_12_1,
@@ -96,76 +113,127 @@ void DX12Backend::CreateDevice() {
     };
     constexpr int kNumFeatureLevels = _countof(kFeatureLevels);
 
-    ComPtr<IDXGIAdapter1> adapter;
-    int bestIdx = -1;
-    int bestFlIdx = -1;
-    SIZE_T bestMem = 0;
+    // Enumerate adapters, deduplicating by VendorId + DeviceId + SubSysId
+    // so the same physical GPU does not appear multiple times.
+    struct AdapterEntry {
+        ComPtr<IDXGIAdapter1> adapter;
+        DXGI_ADAPTER_DESC1 desc;
+        UINT rawIndex;
+        int featureLevelIdx = -1;
+    };
+    std::vector<AdapterEntry> uniqueAdapters;
+    {
+        ComPtr<IDXGIAdapter1> adapter;
+        for (UINT i = 0; factory_->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc{};
+            adapter->GetDesc1(&desc);
+
+            bool duplicate = false;
+            for (const auto& existing : uniqueAdapters) {
+                if (existing.desc.VendorId == desc.VendorId &&
+                    existing.desc.DeviceId == desc.DeviceId &&
+                    existing.desc.SubSysId == desc.SubSysId) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                uniqueAdapters.push_back({adapter, desc, i, -1});
+            }
+            adapter.Reset();
+        }
+    }
 
     std::cout << "Available GPUs:\n";
-    for (UINT i = 0; factory_->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-        DXGI_ADAPTER_DESC1 desc{};
-        adapter->GetDesc1(&desc);
-        bool isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
-
+    for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+        auto& entry = uniqueAdapters[i];
+        bool isSoftware = (entry.desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
         char name[256]{};
-        wcstombs(name, desc.Description, sizeof(name) - 1);
+        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
         std::cout << "  [" << i << "] " << name
                   << (isSoftware ? " (Software)" : " (Hardware)")
-                  << "  VRAM: " << (desc.DedicatedVideoMemory / (1024 * 1024)) << " MB"
-                  << '\n';
+                  << "  VRAM: " << (entry.desc.DedicatedVideoMemory / (1024 * 1024)) << " MB"
+                  << std::endl;
 
-        if (isSoftware) continue;
-
-        int supportedFl = -1;
         for (int fl = 0; fl < kNumFeatureLevels; ++fl) {
-            HRESULT hr = D3D12CreateDevice(adapter.Get(), kFeatureLevels[fl],
+            HRESULT hr = D3D12CreateDevice(entry.adapter.Get(), kFeatureLevels[fl],
                                            __uuidof(ID3D12Device), nullptr);
             if (SUCCEEDED(hr)) {
-                supportedFl = fl;
+                entry.featureLevelIdx = fl;
                 std::cout << "    -> D3D12 supported (Feature Level " << kFeatureLevelNames[fl] << ")\n";
                 break;
             }
         }
-
-        if (supportedFl < 0) {
+        if (entry.featureLevelIdx < 0) {
             std::cout << "    -> Skipped: D3D12 not supported at any feature level\n";
-            continue;
-        }
-
-        if (requestedGpuIndex_ >= 0 && static_cast<int>(i) == requestedGpuIndex_) {
-            bestIdx = static_cast<int>(i);
-            bestFlIdx = supportedFl;
-            break;
-        }
-        if (desc.DedicatedVideoMemory > bestMem) {
-            bestMem = desc.DedicatedVideoMemory;
-            bestIdx = static_cast<int>(i);
-            bestFlIdx = supportedFl;
         }
     }
 
-    if (bestIdx < 0) {
+    // Collect D3D12-capable hardware adapters.
+    std::vector<std::uint32_t> d3d12Indices;
+    for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+        if (uniqueAdapters[i].featureLevelIdx >= 0)
+            d3d12Indices.push_back(i);
+    }
+
+    // Select adapter: --gpu flag, single-choice auto, or interactive prompt.
+    std::uint32_t chosen = 0;
+    bool hasChoice = false;
+
+    if (requestedGpuIndex_ >= 0) {
+        auto idx = static_cast<std::uint32_t>(requestedGpuIndex_);
+        if (idx >= uniqueAdapters.size() || uniqueAdapters[idx].featureLevelIdx < 0)
+            throw std::runtime_error("Requested GPU index " +
+                std::to_string(requestedGpuIndex_) + " does not support D3D12");
+        chosen = idx;
+        hasChoice = true;
+    } else if (d3d12Indices.size() == 1) {
+        chosen = d3d12Indices[0];
+        hasChoice = true;
+    } else if (d3d12Indices.size() > 1) {
+        SIZE_T bestMem = 0;
+        for (auto i : d3d12Indices) {
+            if (uniqueAdapters[i].desc.DedicatedVideoMemory > bestMem) {
+                bestMem = uniqueAdapters[i].desc.DedicatedVideoMemory;
+                chosen = i;
+            }
+        }
+        std::cout << "Multiple D3D12 GPUs detected. Default: [" << chosen << "]\n"
+                  << "Enter GPU index (or 'b' to go back): " << std::flush;
+        std::string line;
+        if (std::getline(std::cin, line) && !line.empty()) {
+            if (line == "b" || line == "B")
+                throw gpu_bench::BackToMenuException();
+            auto idx = static_cast<std::uint32_t>(std::stoi(line));
+            if (idx >= uniqueAdapters.size() || uniqueAdapters[idx].featureLevelIdx < 0)
+                throw std::runtime_error("GPU index " + line + " does not support D3D12");
+            chosen = idx;
+        }
+        hasChoice = true;
+    }
+
+    if (!hasChoice || d3d12Indices.empty()) {
         throw std::runtime_error(
             "No hardware GPU with D3D12 support was found.\n"
             "  Your GPU may only support D3D11. Try: --backend dx11");
-    } else {
-        factory_->EnumAdapters1(static_cast<UINT>(bestIdx), &adapter);
-        D3D_FEATURE_LEVEL selectedFL = kFeatureLevels[bestFlIdx];
-        HRESULT hr = D3D12CreateDevice(adapter.Get(), selectedFL,
+    }
+
+    {
+        auto& entry = uniqueAdapters[chosen];
+        D3D_FEATURE_LEVEL selectedFL = kFeatureLevels[entry.featureLevelIdx];
+        HRESULT hr = D3D12CreateDevice(entry.adapter.Get(), selectedFL,
                                        IID_PPV_ARGS(&device_));
         if (FAILED(hr))
             throw std::runtime_error("D3D12CreateDevice failed for adapter ["
-                + std::to_string(bestIdx) + "] at FL "
-                + kFeatureLevelNames[bestFlIdx]
+                + std::to_string(chosen) + "] at FL "
+                + kFeatureLevelNames[entry.featureLevelIdx]
                 + " (HRESULT " + HrToHex(hr) + ")");
 
-        DXGI_ADAPTER_DESC1 desc{};
-        adapter->GetDesc1(&desc);
         char name[256]{};
-        wcstombs(name, desc.Description, sizeof(name) - 1);
+        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
         deviceName_ = name;
         deviceName_ += " (FL ";
-        deviceName_ += kFeatureLevelNames[bestFlIdx];
+        deviceName_ += kFeatureLevelNames[entry.featureLevelIdx];
         deviceName_ += ")";
     }
 
@@ -182,6 +250,14 @@ void DX12Backend::CreateCommandQueue() {
 void DX12Backend::CreateSwapChain() {
     HWND hwnd = glfwGetWin32Window(window_);
 
+    ComPtr<IDXGIFactory5> factory5;
+    if (SUCCEEDED(factory_.As(&factory5))) {
+        BOOL allow = FALSE;
+        if (SUCCEEDED(factory5->CheckFeatureSupport(
+                DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow, sizeof(allow))))
+            tearingSupported_ = (allow == TRUE);
+    }
+
     DXGI_SWAP_CHAIN_DESC1 sd{};
     sd.BufferCount      = kFrameCount;
     sd.Width            = kWindowWidth;
@@ -190,6 +266,8 @@ void DX12Backend::CreateSwapChain() {
     sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     sd.SampleDesc.Count = 1;
+    if (tearingSupported_)
+        sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
     ComPtr<IDXGISwapChain1> sc1;
     ThrowIfFailed(factory_->CreateSwapChainForHwnd(
@@ -426,7 +504,7 @@ void DX12Backend::CreateParticleBuffer() {
 
 void DX12Backend::CreateTimestampResources() {
     if (FAILED(commandQueue_->GetTimestampFrequency(&gpuFrequency_)) || gpuFrequency_ == 0) {
-        std::cout << "[Profiling] Timestamps not supported – disabled.\n";
+        std::cout << "[Profiling] Timestamps not supported -- disabled.\n";
         return;
     }
 
@@ -434,7 +512,7 @@ void DX12Backend::CreateTimestampResources() {
     qhd.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
     qhd.Count = kTimestampsPerFrame * kFrameCount;
     if (FAILED(device_->CreateQueryHeap(&qhd, IID_PPV_ARGS(&timestampHeap_)))) {
-        std::cout << "[Profiling] Failed to create query heap – disabled.\n";
+        std::cout << "[Profiling] Failed to create query heap -- disabled.\n";
         return;
     }
 
@@ -453,7 +531,7 @@ void DX12Backend::CreateTimestampResources() {
     if (FAILED(device_->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE,
             &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
             IID_PPV_ARGS(&timestampReadback_)))) {
-        std::cout << "[Profiling] Failed to create readback buffer – disabled.\n";
+        std::cout << "[Profiling] Failed to create readback buffer -- disabled.\n";
         timestampHeap_.Reset();
         return;
     }
@@ -613,7 +691,10 @@ void DX12Backend::DrawFrame(float deltaTime) {
     ID3D12CommandList* lists[] = { commandList_.Get() };
     commandQueue_->ExecuteCommandLists(1, lists);
 
-    swapChain_->Present(config_.vsync ? 1 : 0, 0);
+    UINT presentFlags = 0;
+    if (!config_.vsync && tearingSupported_)
+        presentFlags = DXGI_PRESENT_ALLOW_TEARING;
+    swapChain_->Present(config_.vsync ? 1 : 0, presentFlags);
 
     // Signal fence for this frame
     commandQueue_->Signal(fence_.Get(), nextFenceValue_);

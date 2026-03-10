@@ -8,7 +8,55 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#elif defined(__linux__)
+#include <fstream>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
 namespace gpu_bench {
+
+static std::string GetCpuName() {
+#ifdef _WIN32
+    HKEY key = nullptr;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+            "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+            0, KEY_READ, &key) == ERROR_SUCCESS) {
+        char buf[256]{};
+        DWORD size = sizeof(buf);
+        if (RegQueryValueExA(key, "ProcessorNameString", nullptr, nullptr,
+                reinterpret_cast<LPBYTE>(buf), &size) == ERROR_SUCCESS) {
+            RegCloseKey(key);
+            std::string name(buf);
+            while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+            return name;
+        }
+        RegCloseKey(key);
+    }
+#elif defined(__linux__)
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+        if (line.rfind("model name", 0) == 0) {
+            auto pos = line.find(':');
+            if (pos != std::string::npos) {
+                std::string name = line.substr(pos + 1);
+                while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+                return name;
+            }
+        }
+    }
+#elif defined(__APPLE__)
+    char buf[256]{};
+    size_t len = sizeof(buf);
+    if (sysctlbyname("machdep.cpu.brand_string", buf, &len, nullptr, 0) == 0)
+        return std::string(buf);
+#endif
+    return "Unknown";
+}
 
 AppBase::AppBase(std::int32_t gpuIndex, std::string shaderDir,
                  BenchmarkConfig config)
@@ -24,8 +72,7 @@ void AppBase::Run() {
     InitBackend();
     glfwShowWindow(window_);
     MainLoop();
-    if (config_.benchmarkMode)
-        PrintBenchmarkSummary();
+    PrintSummary();
     CleanupBackend();
     CleanupWindow();
 }
@@ -66,6 +113,7 @@ void AppBase::GenerateInitialParticles() {
 
 void AppBase::MainLoop() {
     lastFrameTime_ = glfwGetTime();
+    runStartTime_  = lastFrameTime_;
 
     const std::uint32_t totalBenchFrames =
         config_.benchFrames + config_.warmupFrames;
@@ -80,19 +128,35 @@ void AppBase::MainLoop() {
         DrawFrame(deltaTime);
         ++totalFrameCount_;
 
+        const double elapsed = currentTime - runStartTime_;
+
         if (config_.benchmarkMode) {
             if (totalFrameCount_ == config_.warmupFrames) {
                 benchStartTime_ = glfwGetTime();
+                warmupDone_ = true;
             }
-
             if (totalFrameCount_ > config_.warmupFrames) {
                 ++benchMeasuredFrames_;
                 benchMinFrameTime_ =
                     std::min(benchMinFrameTime_,
                              static_cast<double>(deltaTime));
             }
-
             if (totalFrameCount_ >= totalBenchFrames) {
+                benchEndTime_ = glfwGetTime();
+                break;
+            }
+        } else {
+            if (!warmupDone_ && elapsed >= config_.warmupTimeSec) {
+                warmupDone_ = true;
+                benchStartTime_ = currentTime;
+            }
+            if (warmupDone_) {
+                ++benchMeasuredFrames_;
+                benchMinFrameTime_ =
+                    std::min(benchMinFrameTime_,
+                             static_cast<double>(deltaTime));
+            }
+            if (config_.maxRunTimeSec > 0.0 && elapsed >= config_.maxRunTimeSec) {
                 benchEndTime_ = glfwGetTime();
                 break;
             }
@@ -100,6 +164,9 @@ void AppBase::MainLoop() {
 
         ReportTimingIfDue(static_cast<double>(deltaTime));
     }
+
+    if (benchEndTime_ == 0.0)
+        benchEndTime_ = glfwGetTime();
 
     WaitIdle();
 }
@@ -111,7 +178,7 @@ void AppBase::AccumulateTiming(double computeMs, double renderMs,
     accumTotalGpuMs_ += totalGpuMs;
     ++timingSampleCount_;
 
-    if (config_.benchmarkMode && totalFrameCount_ > config_.warmupFrames) {
+    if (warmupDone_) {
         benchMinComputeMs_  = std::min(benchMinComputeMs_,  computeMs);
         benchMaxComputeMs_  = std::max(benchMaxComputeMs_,  computeMs);
         benchMinRenderMs_   = std::min(benchMinRenderMs_,   renderMs);
@@ -139,9 +206,15 @@ void AppBase::ReportTimingIfDue(double deltaTime) {
         const double avgRender  = accumRenderMs_   / timingSampleCount_;
         const double avgTotal   = accumTotalGpuMs_ / timingSampleCount_;
 
-        std::cout << "[GPU Timing] Compute: " << std::fixed << std::setprecision(3)
+        const std::string devName = GetDeviceName();
+        const bool sw = (devName.find("Basic Render") != std::string::npos ||
+                         devName.find("WARP") != std::string::npos ||
+                         devName.find("Software") != std::string::npos);
+
+        std::cout << "[" << (sw ? "Timing" : "GPU Timing") << "] Compute: "
+                  << std::fixed << std::setprecision(3)
                   << avgCompute << " ms | Render: " << avgRender
-                  << " ms | Total GPU: " << avgTotal
+                  << " ms | Total: " << avgTotal
                   << " ms | FPS: " << static_cast<int>(fps);
 
         if (config_.benchmarkMode) {
@@ -171,38 +244,45 @@ void AppBase::ReportTimingIfDue(double deltaTime) {
     timingReportTimer_ = 0.0;
 }
 
-void AppBase::PrintBenchmarkSummary() const {
+void AppBase::PrintSummary() const {
     const double duration = benchEndTime_ - benchStartTime_;
     const double avgFps   = (duration > 0.0)
         ? static_cast<double>(benchMeasuredFrames_) / duration
         : 0.0;
-    const double peakFps  = (benchMinFrameTime_ > 0.0)
-        ? 1.0 / benchMinFrameTime_
-        : 0.0;
+
+    const std::string devName = GetDeviceName();
+    const bool isSoftware = (devName.find("Basic Render") != std::string::npos ||
+                             devName.find("WARP") != std::string::npos ||
+                             devName.find("Software") != std::string::npos);
+    const char* devLabel   = isSoftware ? "CPU Renderer:" : "GPU:";
+    const char* timerLabel = isSoftware ? "Device Timing (ms)" : "GPU Timing (ms)";
+    const char* totalLabel = isSoftware ? "Total:      " : "Total GPU:  ";
 
     std::cout << "\n"
         "==========================================================\n"
-        "                   GPU Benchmark Report\n"
+        "                   Benchmark Summary\n"
         "==========================================================\n";
 
-    std::cout << std::left
-        << std::setw(14) << "Backend:"    << GetBackendName() << "\n"
-        << std::setw(14) << "GPU:"        << GetDeviceName()  << "\n"
+    std::cout << std::left << std::fixed
+        << std::setw(14) << "Graphics API:" << GetBackendName() << "\n"
+        << std::setw(14) << devLabel      << devName  << "\n"
+        << std::setw(14) << "CPU:"        << GetCpuName() << "\n"
+        << std::setw(14) << "Memory:"     << (config_.hostMemory ? "Host-visible (System RAM)" : "Device-local") << "\n"
         << std::setw(14) << "Resolution:" << kWindowWidth << "x" << kWindowHeight << "\n"
-        << std::setw(14) << "Particles:"  << config_.particleCount << "\n"
+        << std::setw(14) << "Particles:"  << config_.particleCount
+            << " (" << config_.difficultyLabel << ")\n"
         << std::setw(14) << "V-Sync:"     << (config_.vsync ? "ON" : "OFF") << "\n"
-        << std::setw(14) << "Frames:"     << config_.benchFrames
-            << " (warmup: " << config_.warmupFrames
-            << ", measured: " << benchMeasuredFrames_ << ")\n"
         << std::setw(14) << "Duration:"
-            << std::fixed << std::setprecision(3) << duration << " s\n";
+            << std::setprecision(1) << duration << " s"
+            << " (warmup: " << std::setprecision(1) << config_.warmupTimeSec << " s"
+            << ", measured: " << benchMeasuredFrames_ << " frames)\n";
 
     if (benchSampleCount_ > 0) {
         const double avgCompute  = benchSumComputeMs_  / benchSampleCount_;
         const double avgRender   = benchSumRenderMs_   / benchSampleCount_;
-        const double avgTotalGpu = benchSumTotalGpuMs_ / benchSampleCount_;
+        const double avgTotal    = benchSumTotalGpuMs_ / benchSampleCount_;
 
-        std::cout << "\n--- GPU Timing (ms) ---\n"
+        std::cout << "\n--- " << timerLabel << " ---\n"
             << std::right
             << "              " << std::setw(10) << "Avg"
                                 << std::setw(10) << "Min"
@@ -213,15 +293,43 @@ void AppBase::PrintBenchmarkSummary() const {
             << "Render:     " << std::setw(10) << avgRender
                               << std::setw(10) << benchMinRenderMs_
                               << std::setw(10) << benchMaxRenderMs_ << "\n"
-            << "Total GPU:  " << std::setw(10) << avgTotalGpu
+            << totalLabel     << std::setw(10) << avgTotal
                               << std::setw(10) << benchMinTotalGpuMs_
                               << std::setw(10) << benchMaxTotalGpuMs_ << "\n";
+
+        std::cout << "\n--- Throughput ---\n"
+            << "Avg FPS:      " << static_cast<int>(avgFps) << "\n";
+
+        const double avgFrameMs = (avgFps > 0.0) ? 1000.0 / avgFps : 0.0;
+        const double devUtil = (avgFrameMs > 0.0) ? avgTotal / avgFrameMs : 0.0;
+
+        std::cout << "\n--- Analysis ---\n"
+            << "Avg frame time:  " << std::setprecision(3) << avgFrameMs << " ms\n"
+            << "Avg " << (isSoftware ? "device" : "GPU") << " time: "
+            << std::string(isSoftware ? 1 : 3, ' ')
+            << avgTotal << " ms\n"
+            << (isSoftware ? "Device" : "GPU") << " utilisation: "
+            << std::setprecision(1) << (devUtil * 100.0) << "%\n";
+
+        if (isSoftware) {
+            std::cout << ">> Software renderer -- all work runs on CPU.\n";
+        } else if (devUtil < 0.5) {
+            std::cout << ">> CPU-bound: GPU is idle "
+                      << static_cast<int>((1.0 - devUtil) * 100.0)
+                      << "% of the time.\n"
+                      << "   -> Try a higher difficulty for more accurate GPU benchmarking.\n";
+        } else if (devUtil > 0.8) {
+            std::cout << ">> GPU-bound: GPU is the bottleneck.\n";
+        } else {
+            std::cout << ">> Balanced: CPU and GPU workloads are roughly matched.\n";
+        }
+    } else {
+        std::cout << "\n--- Throughput ---\n"
+            << "Avg FPS:      " << static_cast<int>(avgFps)  << "\n"
+            << "\n(No timestamp data available for analysis.)\n";
     }
 
-    std::cout << "\n--- Throughput ---\n"
-        << "Avg FPS:    " << static_cast<int>(avgFps)  << "\n"
-        << "Peak FPS:   " << static_cast<int>(peakFps) << "\n"
-        << "==========================================================\n"
+    std::cout << "==========================================================\n"
         << std::endl;
 }
 

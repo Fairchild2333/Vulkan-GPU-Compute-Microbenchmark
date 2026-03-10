@@ -5,7 +5,7 @@
 #include "app_base.h"
 
 #include <d3d12.h>
-#include <dxgi1_4.h>
+#include <dxgi1_5.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
@@ -83,6 +83,7 @@ private:
     UINT64                          nextFenceValue_ = 1;
     UINT64                          frameFenceValues_[kFrameCount]{};
     UINT                            frameIndex_ = 0;
+    bool                            tearingSupported_ = false;
 };
 
 }  // namespace gpu_bench

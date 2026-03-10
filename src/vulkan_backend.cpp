@@ -21,11 +21,11 @@ void VulkanBackend::InitBackend() {
     CreateRenderPass();
     CreateGraphicsPipeline();
     CreateComputeDescriptorSetLayout();
+    CreateCommandPool();
     CreateParticleBuffer();
     CreateComputeDescriptorResources();
     CreateComputePipeline();
     CreateFramebuffers();
-    CreateCommandPool();
     CreateCommandBuffers();
     CreateSyncObjects();
     CreateTimestampQueryPool();
@@ -162,9 +162,11 @@ void VulkanBackend::PickPhysicalDevice() {
             throw std::runtime_error("Requested GPU index unsuitable");
         chosen = idx;
     } else if (suitable.size() > 1) {
-        std::cout << "Enter GPU index to use: ";
+        std::cout << "Enter GPU index (or 'b' to go back): ";
         std::string line;
         if (std::getline(std::cin, line) && !line.empty()) {
+            if (line == "b" || line == "B")
+                throw gpu_bench::BackToMenuException();
             auto idx = static_cast<std::uint32_t>(std::stoi(line));
             if (idx >= count || !IsDeviceSuitable(devices[idx]))
                 throw std::runtime_error("GPU index unsuitable");
@@ -246,33 +248,94 @@ std::uint32_t VulkanBackend::FindMemoryType(std::uint32_t filter, VkMemoryProper
 void VulkanBackend::CreateParticleBuffer() {
     const VkDeviceSize size = sizeof(Particle) * config_.particleCount;
 
-    VkBufferCreateInfo bi{};
-    bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bi.size        = size;
-    bi.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(device_, &bi, nullptr, &particleBuffer_) != VK_SUCCESS)
-        throw std::runtime_error("vkCreateBuffer failed");
+    auto createBuffer = [&](VkDeviceSize sz, VkBufferUsageFlags usage,
+                            VkMemoryPropertyFlags memProps,
+                            VkBuffer& buf, VkDeviceMemory& mem) {
+        VkBufferCreateInfo bi{};
+        bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bi.size        = sz;
+        bi.usage       = usage;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(device_, &bi, nullptr, &buf) != VK_SUCCESS)
+            throw std::runtime_error("vkCreateBuffer failed");
 
-    VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(device_, particleBuffer_, &req);
+        VkMemoryRequirements req{};
+        vkGetBufferMemoryRequirements(device_, buf, &req);
 
-    VkMemoryAllocateInfo ai{};
-    ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    ai.allocationSize   = req.size;
-    ai.memoryTypeIndex = FindMemoryType(req.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (vkAllocateMemory(device_, &ai, nullptr, &particleBufferMemory_) != VK_SUCCESS)
-        throw std::runtime_error("vkAllocateMemory failed");
+        VkMemoryAllocateInfo ai{};
+        ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        ai.allocationSize  = req.size;
+        ai.memoryTypeIndex = FindMemoryType(req.memoryTypeBits, memProps);
+        if (vkAllocateMemory(device_, &ai, nullptr, &mem) != VK_SUCCESS)
+            throw std::runtime_error("vkAllocateMemory failed");
 
-    vkBindBufferMemory(device_, particleBuffer_, particleBufferMemory_, 0);
+        vkBindBufferMemory(device_, buf, mem, 0);
+    };
 
-    void* data = nullptr;
-    vkMapMemory(device_, particleBufferMemory_, 0, size, 0, &data);
-    std::memcpy(data, initialParticles_.data(), static_cast<std::size_t>(size));
-    vkUnmapMemory(device_, particleBufferMemory_);
+    const VkBufferUsageFlags gpuUsage =
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-    std::cout << "Created particle buffer: " << config_.particleCount << " particles\n";
+    if (config_.hostMemory) {
+        createBuffer(size, gpuUsage,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     particleBuffer_, particleBufferMemory_);
+
+        void* data = nullptr;
+        vkMapMemory(device_, particleBufferMemory_, 0, size, 0, &data);
+        std::memcpy(data, initialParticles_.data(), static_cast<std::size_t>(size));
+        vkUnmapMemory(device_, particleBufferMemory_);
+
+        std::cout << "Created particle buffer (host-visible): "
+                  << config_.particleCount << " particles\n";
+    } else {
+        createBuffer(size, gpuUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                     particleBuffer_, particleBufferMemory_);
+
+        VkBuffer       stagingBuf = VK_NULL_HANDLE;
+        VkDeviceMemory stagingMem = VK_NULL_HANDLE;
+        createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuf, stagingMem);
+
+        void* data = nullptr;
+        vkMapMemory(device_, stagingMem, 0, size, 0, &data);
+        std::memcpy(data, initialParticles_.data(), static_cast<std::size_t>(size));
+        vkUnmapMemory(device_, stagingMem);
+
+        VkCommandBufferAllocateInfo cmdAi{};
+        cmdAi.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cmdAi.commandPool        = commandPool_;
+        cmdAi.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmdAi.commandBufferCount = 1;
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        vkAllocateCommandBuffers(device_, &cmdAi, &cmd);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cmd, &beginInfo);
+
+        VkBufferCopy region{};
+        region.size = size;
+        vkCmdCopyBuffer(cmd, stagingBuf, particleBuffer_, 1, &region);
+
+        vkEndCommandBuffer(cmd);
+
+        VkSubmitInfo si{};
+        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers    = &cmd;
+        vkQueueSubmit(graphicsQueue_, 1, &si, VK_NULL_HANDLE);
+        vkQueueWaitIdle(graphicsQueue_);
+
+        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+        vkDestroyBuffer(device_, stagingBuf, nullptr);
+        vkFreeMemory(device_, stagingMem, nullptr);
+
+        std::cout << "Created particle buffer (device-local via staging): "
+                  << config_.particleCount << " particles\n";
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -629,6 +692,7 @@ void VulkanBackend::CreateSyncObjects() {
             vkCreateFence(device_, &fi, nullptr, &inFlightFences_[i]) != VK_SUCCESS)
             throw std::runtime_error("Failed to create sync objects");
     }
+    imagesInFlight_.resize(swapChainImages_.size(), VK_NULL_HANDLE);
 }
 
 void VulkanBackend::CreateTimestampQueryPool() {
@@ -639,7 +703,7 @@ void VulkanBackend::CreateTimestampQueryPool() {
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &cnt, fams.data());
 
     if (fams[idx.graphicsFamily.value()].timestampValidBits == 0) {
-        std::cout << "[Profiling] Timestamps not supported – disabled.\n";
+        std::cout << "[Profiling] Timestamps not supported -- disabled.\n";
         return;
     }
 
@@ -652,7 +716,7 @@ void VulkanBackend::CreateTimestampQueryPool() {
     ci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
     ci.queryCount = kTimestampsPerFrame * kMaxFramesInFlight;
     if (vkCreateQueryPool(device_, &ci, nullptr, &timestampQueryPool_) != VK_SUCCESS) {
-        std::cerr << "[Profiling] Failed to create query pool – disabled.\n";
+        std::cerr << "[Profiling] Failed to create query pool -- disabled.\n";
         return;
     }
 
@@ -765,6 +829,10 @@ void VulkanBackend::DrawFrame(float deltaTime) {
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
         throw std::runtime_error("vkAcquireNextImageKHR failed");
 
+    if (imagesInFlight_[imageIndex] != VK_NULL_HANDLE)
+        vkWaitForFences(device_, 1, &imagesInFlight_[imageIndex], VK_TRUE, UINT64_MAX);
+    imagesInFlight_[imageIndex] = inFlightFences_[currentFrame_];
+
     vkResetFences(device_, 1, &inFlightFences_[currentFrame_]);
     RecordCommandBuffer(imageIndex, deltaTime);
 
@@ -779,8 +847,13 @@ void VulkanBackend::DrawFrame(float deltaTime) {
     si.commandBufferCount   = 1; si.pCommandBuffers   = &commandBuffers_[imageIndex];
     si.signalSemaphoreCount = 1; si.pSignalSemaphores = sigSem;
 
-    if (vkQueueSubmit(graphicsQueue_, 1, &si, inFlightFences_[currentFrame_]) != VK_SUCCESS)
-        throw std::runtime_error("vkQueueSubmit failed");
+    res = vkQueueSubmit(graphicsQueue_, 1, &si, inFlightFences_[currentFrame_]);
+    if (res != VK_SUCCESS) {
+        std::string msg = "vkQueueSubmit failed (VkResult " + std::to_string(static_cast<int>(res)) + ")";
+        if (res == VK_ERROR_DEVICE_LOST)
+            msg += " -- GPU device lost; try restarting the application or rebooting";
+        throw std::runtime_error(msg);
+    }
 
     VkSwapchainKHR chains[] = { swapChain_ };
     VkPresentInfoKHR pi{};
@@ -802,6 +875,7 @@ void VulkanBackend::CleanupSwapChain() {
     swapChainFramebuffers_.clear();
     for (auto iv : swapChainImageViews_)   vkDestroyImageView(device_, iv, nullptr);
     swapChainImageViews_.clear();
+    imagesInFlight_.clear();
     if (renderPass_ != VK_NULL_HANDLE) { vkDestroyRenderPass(device_, renderPass_, nullptr); renderPass_ = VK_NULL_HANDLE; }
     if (swapChain_  != VK_NULL_HANDLE) { vkDestroySwapchainKHR(device_, swapChain_, nullptr); swapChain_ = VK_NULL_HANDLE; }
 }

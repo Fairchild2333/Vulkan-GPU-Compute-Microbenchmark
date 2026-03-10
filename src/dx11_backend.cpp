@@ -6,9 +6,12 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -65,37 +68,124 @@ void DX11Backend::CreateDeviceAndSwapChain() {
     ComPtr<IDXGIFactory2> factory;
     ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "CreateDXGIFactory1 failed");
 
-    // Enumerate adapters
-    ComPtr<IDXGIAdapter1> bestAdapter;
-    int bestIdx = -1;
-    SIZE_T bestMem = 0;
+    // Sentinel -2: WARP software renderer requested from main.cpp.
+    if (requestedGpuIndex_ == -2) {
+        std::cout << "[DX11] Using Microsoft WARP software renderer (CPU)." << std::endl;
 
-    ComPtr<IDXGIAdapter1> adapter;
-    std::cout << "Available GPUs:\n";
-    for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-        DXGI_ADAPTER_DESC1 desc{};
-        adapter->GetDesc1(&desc);
-        bool isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+        D3D_FEATURE_LEVEL featureLevels[] = {
+            D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+        };
+        D3D_FEATURE_LEVEL actualFL{};
+        UINT flags = 0;
+#ifdef _DEBUG
+        flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+        ThrowIfFailed(D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
+            featureLevels, _countof(featureLevels), D3D11_SDK_VERSION,
+            &device_, &actualFL, &context_),
+            "D3D11CreateDevice (WARP) failed");
 
-        char name[256]{};
-        wcstombs(name, desc.Description, sizeof(name) - 1);
-        std::cout << "  [" << i << "] " << name
-                  << (isSoftware ? " (Software)" : " (Hardware)") << '\n';
+        deviceName_ = "Microsoft WARP (CPU Software Renderer)";
+        std::cout << "Selected GPU: " << deviceName_ << std::endl;
 
-        if (isSoftware) { adapter.Reset(); continue; }
+        DXGI_SWAP_CHAIN_DESC1 sd{};
+        sd.Width            = kWindowWidth;
+        sd.Height           = kWindowHeight;
+        sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.SampleDesc.Count = 1;
+        sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.BufferCount      = 2;
+        sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        if (!config_.vsync) sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-        if (requestedGpuIndex_ >= 0 && static_cast<int>(i) == requestedGpuIndex_) {
-            bestIdx = static_cast<int>(i);
-            bestAdapter = adapter;
-            break;
-        }
-        if (desc.DedicatedVideoMemory > bestMem) {
-            bestMem = desc.DedicatedVideoMemory;
-            bestIdx = static_cast<int>(i);
-            bestAdapter = adapter;
-        }
-        adapter.Reset();
+        ThrowIfFailed(factory->CreateSwapChainForHwnd(
+            device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
+            "CreateSwapChainForHwnd (WARP) failed");
+        return;
     }
+
+    // Normal hardware adapter path follows.
+    struct AdapterEntry {
+        ComPtr<IDXGIAdapter1> adapter;
+        DXGI_ADAPTER_DESC1 desc;
+        UINT rawIndex;
+    };
+    std::vector<AdapterEntry> uniqueAdapters;
+    {
+        ComPtr<IDXGIAdapter1> adapter;
+        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc{};
+            adapter->GetDesc1(&desc);
+
+            bool duplicate = false;
+            for (const auto& existing : uniqueAdapters) {
+                if (existing.desc.VendorId == desc.VendorId &&
+                    existing.desc.DeviceId == desc.DeviceId &&
+                    existing.desc.SubSysId == desc.SubSysId) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                uniqueAdapters.push_back({adapter, desc, i});
+            }
+            adapter.Reset();
+        }
+    }
+
+    std::cout << "Available GPUs:\n";
+    for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+        const auto& entry = uniqueAdapters[i];
+        bool isSoftware = (entry.desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+        char name[256]{};
+        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
+        std::cout << "  [" << i << "] " << name
+                  << (isSoftware ? " (Software)" : " (Hardware)")
+                  << "  VRAM: " << (entry.desc.DedicatedVideoMemory / (1024 * 1024)) << " MB"
+                  << std::endl;
+    }
+
+    // Select adapter: --gpu flag, single-choice auto, or interactive prompt.
+    std::uint32_t chosen = 0;
+    std::vector<std::uint32_t> hwIndices;
+    for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+        if ((uniqueAdapters[i].desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0)
+            hwIndices.push_back(i);
+    }
+
+    if (requestedGpuIndex_ >= 0) {
+        auto idx = static_cast<std::uint32_t>(requestedGpuIndex_);
+        if (idx >= uniqueAdapters.size())
+            throw std::runtime_error("Requested GPU index " +
+                std::to_string(requestedGpuIndex_) + " is out of range");
+        chosen = idx;
+    } else if (hwIndices.size() == 1) {
+        chosen = hwIndices[0];
+    } else if (hwIndices.size() > 1) {
+        // Pick the one with the most dedicated VRAM by default, but let
+        // the user override interactively.
+        SIZE_T bestMem = 0;
+        for (auto i : hwIndices) {
+            if (uniqueAdapters[i].desc.DedicatedVideoMemory > bestMem) {
+                bestMem = uniqueAdapters[i].desc.DedicatedVideoMemory;
+                chosen = i;
+            }
+        }
+        std::cout << "Multiple hardware GPUs detected. Default: [" << chosen << "]\n"
+                  << "Enter GPU index (or 'b' to go back): " << std::flush;
+        std::string line;
+        if (std::getline(std::cin, line) && !line.empty()) {
+            if (line == "b" || line == "B")
+                throw gpu_bench::BackToMenuException();
+            auto idx = static_cast<std::uint32_t>(std::stoi(line));
+            if (idx >= uniqueAdapters.size())
+                throw std::runtime_error("GPU index " + line + " is out of range");
+            chosen = idx;
+        }
+    }
+
+    ComPtr<IDXGIAdapter1> bestAdapter = uniqueAdapters[chosen].adapter;
 
     D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
@@ -153,6 +243,15 @@ void DX11Backend::CreateDeviceAndSwapChain() {
               << "  Driver type:   " << adapterType << '\n'
               << "  Feature Level: " << flName(actualFeatureLevel) << std::endl;
 
+    // Check tearing support
+    ComPtr<IDXGIFactory5> factory5;
+    if (SUCCEEDED(factory.As(&factory5))) {
+        BOOL allow = FALSE;
+        if (SUCCEEDED(factory5->CheckFeatureSupport(
+                DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow, sizeof(allow))))
+            tearingSupported_ = (allow == TRUE);
+    }
+
     // Create swap chain
     DXGI_SWAP_CHAIN_DESC1 sd{};
     sd.Width            = kWindowWidth;
@@ -162,6 +261,8 @@ void DX11Backend::CreateDeviceAndSwapChain() {
     sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.BufferCount      = 2;
     sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    if (tearingSupported_)
+        sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
     ThrowIfFailed(factory->CreateSwapChainForHwnd(
         device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
@@ -275,10 +376,17 @@ void DX11Backend::CreateTimestampQueries() {
     D3D11_QUERY_DESC ts{};
     ts.Query = D3D11_QUERY_TIMESTAMP;
 
-    for (UINT f = 0; f < kMaxFramesInFlight; ++f) {
-        if (FAILED(device_->CreateQuery(&dj, &disjointQueries_[f]))) return;
-        for (UINT q = 0; q < kTimestampsPerFrame; ++q)
-            if (FAILED(device_->CreateQuery(&ts, &timestampQueries_[f][q]))) return;
+    for (UINT f = 0; f < kTimestampSlotCount; ++f) {
+        if (FAILED(device_->CreateQuery(&dj, &disjointQueries_[f]))) {
+            std::cout << "[Profiling] DX11 timestamp disjoint query creation failed -- disabled.\n";
+            return;
+        }
+        for (UINT q = 0; q < kTimestampsPerFrame; ++q) {
+            if (FAILED(device_->CreateQuery(&ts, &timestampQueries_[f][q]))) {
+                std::cout << "[Profiling] DX11 timestamp query creation failed -- disabled.\n";
+                return;
+            }
+        }
     }
 
     timestampsSupported_ = true;
@@ -288,19 +396,42 @@ void DX11Backend::CreateTimestampQueries() {
 void DX11Backend::CollectTimestampResults() {
     if (!timestampsSupported_) return;
 
-    UINT readSlot = (currentFrame_ + 1) % kMaxFramesInFlight;
+    // Wait until we have submitted enough frames to fill the ring buffer
+    if (timestampFrameCount_ < kTimestampSlotCount) return;
+
+    UINT readSlot = (currentFrame_ + 1) % kTimestampSlotCount;
 
     D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
-    if (context_->GetData(disjointQueries_[readSlot].Get(),
-                          &disjoint, sizeof(disjoint), 0) != S_OK)
+    HRESULT hr = context_->GetData(disjointQueries_[readSlot].Get(),
+                                   &disjoint, sizeof(disjoint), 0);
+    if (hr != S_OK) {
+        if (!timestampDiagPrinted_) {
+            std::cout << "[Profiling] DX11 disjoint GetData hr=0x"
+                      << std::hex << hr << std::dec
+                      << " slot=" << readSlot
+                      << " frame=" << timestampFrameCount_ << std::endl;
+            timestampDiagPrinted_ = true;
+        }
         return;
-    if (disjoint.Disjoint) return;
+    }
+    if (disjoint.Disjoint) {
+        if (!timestampDiagPrinted_) {
+            std::cout << "[Profiling] DX11 disjoint=TRUE slot="
+                      << readSlot << std::endl;
+            timestampDiagPrinted_ = true;
+        }
+        return;
+    }
 
     UINT64 ts[kTimestampsPerFrame]{};
     for (UINT i = 0; i < kTimestampsPerFrame; ++i) {
-        if (context_->GetData(timestampQueries_[readSlot][i].Get(),
-                              &ts[i], sizeof(UINT64), 0) != S_OK)
-            return;
+        hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
+                               &ts[i], sizeof(UINT64), 0);
+        for (int retry = 0; retry < 64 && hr == S_FALSE; ++retry)
+            hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
+                                   &ts[i], sizeof(UINT64),
+                                   D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (hr != S_OK) return;
     }
 
     double toMs = 1000.0 / static_cast<double>(disjoint.Frequency);
@@ -382,9 +513,14 @@ void DX11Backend::DrawFrame(float deltaTime) {
     if (timestampsSupported_)
         context_->End(disjointQueries_[slot].Get());
 
-    swapChain_->Present(config_.vsync ? 1 : 0, 0);
+    UINT presentFlags = 0;
+    if (!config_.vsync && tearingSupported_)
+        presentFlags = DXGI_PRESENT_ALLOW_TEARING;
+    swapChain_->Present(config_.vsync ? 1 : 0, presentFlags);
 
-    currentFrame_ = (currentFrame_ + 1) % kMaxFramesInFlight;
+    if (timestampsSupported_ && timestampFrameCount_ < kTimestampSlotCount)
+        ++timestampFrameCount_;
+    currentFrame_ = (currentFrame_ + 1) % kTimestampSlotCount;
 }
 
 void DX11Backend::WaitIdle() {
