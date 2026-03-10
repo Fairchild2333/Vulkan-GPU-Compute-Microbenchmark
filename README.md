@@ -247,3 +247,109 @@ Each backend overrides:
 - `DrawFrame(dt)` — dispatch compute, render, present
 - `CleanupBackend()` — release GPU resources
 - `GetBackendName()` / `GetDeviceName()` — for display
+
+## Roadmap
+
+### Completed
+
+- [x] Vulkan compute + graphics pipeline with particle simulation
+- [x] DirectX 12 / DirectX 11 / Metal backend ports
+- [x] GPU timestamp profiling (all backends)
+- [x] Benchmark mode with standardised report output
+- [x] Multi-GPU selection (`--gpu` flag)
+- [x] HarmonyOS (OHOS) Vulkan port via XComponent
+
+### In Progress / Planned
+
+#### Web Backend — WebGL / WebGPU
+
+Browser-based port of the particle benchmark, inspired by projects such as
+[Volume Shader BM](https://volumeshader-bm.com/). Goals:
+
+- **WebGPU** compute shader path (WGSL) for browsers with WebGPU support.
+- **WebGL 2.0** fallback using transform feedback for particle updates.
+- Hosted as a static site so anyone can run the benchmark without installing
+  drivers or SDKs.
+- Cross-platform, cross-system league table comparing results from native
+  backends (Vulkan / DX / Metal) against web backends on the same hardware.
+
+#### Cross-Platform & Cross-GPU Performance Comparison
+
+Publish a written analysis document comparing frame rates and GPU timings
+across a range of AMD hardware:
+
+| GPU | Architecture | CUs / SPs | VRAM | Notes |
+|-----|-------------|-----------|------|-------|
+| HD 5770 | Evergreen (TeraScale 2, before GCN) | 800 SPs | 1 GB | Legacy DX11-era GPU |
+| RX 580 | Polaris (GCN 4) | 36 CUs | 8 GB | Mid-range GCN |
+| Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Prosumer / compute |
+| RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Mid-range RDNA 2 |
+| RX 6900 XT | RDNA 2 | 80 CUs | 16 GB | Flagship RDNA 2 |
+| Ryzen 7 9800X3D iGPU | RDNA 3 | 2 CUs | Shared | Integrated graphics |
+| Ryzen 7 9800X3D (WARP) | Software | — | System RAM | Microsoft WARP software rasteriser on AMD CPU |
+
+> **HD 5770 note:** Evergreen does not support Vulkan. Testing will use the
+> DX11 backend only (Feature Level 11_0).
+>
+> **WARP note:** The Windows Advanced Rasterization Platform (WARP) is a
+> high-performance software renderer included in DirectX. Running the DX11 /
+> DX12 backends on WARP with an AMD CPU provides a pure-software baseline,
+> isolating CPU compute throughput from GPU hardware.
+
+The document will cover:
+
+- Per-backend (Vulkan / DX11 / DX12 / WARP) frame-rate comparison at
+  65 536 particles.
+- Scaling behaviour when increasing particle count (64 K → 1 M → 4 M).
+- Compute vs render timing breakdown per GPU (and CPU via WARP).
+- Hardware vs software rendering comparison (discrete GPU vs WARP baseline).
+- Thermal throttling observations during sustained benchmark runs.
+- Generational progression from TeraScale 2 → GCN → RDNA 2 → RDNA 3.
+
+#### Workgroup Size Tuning Experiments
+
+Sweep `local_size_x` across powers of two (32, 64, 128, 256, 512, 1024) and
+measure the impact on compute dispatch time for each GPU above. Publish
+findings as an analysis document covering:
+
+- Optimal workgroup size per architecture (GCN vs RDNA 2 vs RDNA 3).
+- Occupancy and wavefront utilisation implications.
+- Correlation with CU count and cache hierarchy.
+
+#### Memory Allocation Strategy Comparison
+
+Benchmark and document the performance difference between:
+
+| Strategy | Vulkan Flags | Use Case |
+|----------|-------------|----------|
+| Host-visible / host-coherent | `HOST_VISIBLE \| HOST_COHERENT` | Current approach — simple, CPU-mappable |
+| Device-local + staging buffer | `DEVICE_LOCAL` + staging copy | Optimal for discrete GPUs |
+| Persistent mapping | `HOST_VISIBLE \| HOST_COHERENT` + persistent `vkMapMemory` | Avoids repeated map/unmap |
+| Device-local host-visible (ReBAR) | `DEVICE_LOCAL \| HOST_VISIBLE` | AMD SAM / ReBAR on supported GPUs |
+
+Measure particle-buffer throughput and compute dispatch latency for each
+strategy across integrated and discrete GPUs.
+
+#### RenderDoc Frame-Capture Walkthrough
+
+A step-by-step analysis document demonstrating proficiency with industry-
+standard GPU profiling tools:
+
+- Attaching RenderDoc to the Vulkan backend.
+- Capturing a single frame and inspecting the event list.
+- Viewing compute dispatch timings, SSBO contents, and barrier placement.
+- Identifying pipeline bubbles or redundant barriers.
+- Annotated screenshots with explanations.
+
+#### Advanced Particle Interactions
+
+Extend the compute shader to support richer physics:
+
+- **Gravitational attraction** — N-body style pairwise forces (shared-memory
+  tiling for O(N log N) or O(N²) with optimisation notes).
+- **Simple collision response** — spatial hashing or grid-based broad phase.
+- **Attractors / repulsors** — mouse-driven interactive forces.
+
+This demonstrates more complex compute shader design, including shared-memory
+optimisation and synchronisation within workgroups.
+·
