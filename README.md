@@ -1,4 +1,4 @@
-# GPU Compute & Rendering Pipeline — Multi-Backend
+# GPU Compute & Rendering Pipeline — Multi-Graphics API
 
 A real-time particle simulation using GPU compute shaders with four
 interchangeable rendering backends: **Vulkan**, **DirectX 12**,
@@ -8,7 +8,7 @@ with GPU timestamp profiling.
 
 ## Supported Backends
 
-| Backend | API Level | Platforms | Notes |
+| Graphics API | API Level | Platforms | Notes |
 |---------|-----------|-----------|-------|
 | Vulkan  | 1.2       | Windows, Linux, **HarmonyOS** | Requires Vulkan SDK + ICD driver |
 | DX12    | Feature Level 11_0 | Windows 10+ | Best compatibility on Windows on ARM |
