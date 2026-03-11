@@ -6,14 +6,14 @@ interchangeable rendering backends: **Vulkan**, **DirectX 12**,
 physics (Euler integration in a compute shader) and point-cloud rendering,
 with GPU timestamp profiling.
 
-## Supported Backends
+## Supported Graphics APIs
 
 | Graphics API | API Level | Platforms | Notes |
 |---------|-----------|-----------|-------|
-| Vulkan  | 1.2       | Windows, Linux, **HarmonyOS** | Requires Vulkan SDK + ICD driver |
+| Vulkan  | 1.2       | Windows, Linux, HarmonyOS | Requires Vulkan SDK + ICD driver |
 | DX12    | Feature Level 11_0 | Windows 10+ | Best compatibility on Windows on ARM |
 | DX11    | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
-| Metal   | Metal 2+  | **macOS** (Apple Silicon / Intel) | Native Apple GPU API |
+| Metal   | Metal 2+  | macOS (Apple Silicon / Intel) | Native Apple GPU API |
 
 ### HarmonyOS PC
 

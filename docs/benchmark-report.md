@@ -103,6 +103,18 @@ On hardware GPUs, DX11 outperforms DX12/Vulkan because the driver's implicit sta
 
 This observation reinforces that the DX11 driver's "free optimisation" is specifically valuable for **hardware GPU command submission** — when that hardware is absent, the optimisation layer becomes a liability.
 
+### 4c. WARP as a Vulkan Device — Dozen Translation Layer
+
+On some systems (notably Windows on ARM devices where the hardware GPU lacks a native Vulkan ICD), the Vulkan physical device enumeration reports **"Microsoft Basic Render Driver"** with Vulkan support. This is not WARP natively implementing Vulkan — it is **Mesa Dozen**, a Vulkan-on-D3D12 translation layer shipped with Windows 11, wrapping WARP's D3D12 interface as a Vulkan device:
+
+```
+Vulkan application  →  Dozen (Vulkan → D3D12)  →  WARP (D3D12, CPU)
+```
+
+On systems with a hardware Vulkan ICD (e.g. NVIDIA, AMD), the Dozen/WARP device is typically not enumerated or is deprioritised by the Vulkan loader. This explains why WARP appears as a Vulkan-capable device only on certain configurations.
+
+The practical consequence: selecting Vulkan on such a system is **functionally identical to selecting DX12 on WARP** — both end up as CPU-based software rendering with an additional translation overhead from Dozen.
+
 ---
 
 ## Summary
@@ -116,5 +128,6 @@ This observation reinforces that the DX11 driver's "free optimisation" is specif
 | Device-local 35× faster than host-visible on dGPU | PCIe round-trips dominate compute shader memory access patterns |
 | Host-visible = Device-local on iGPU | Unified memory architecture — no PCIe hop |
 | WARP ~80× slower than hardware GPU | Expected for CPU-based software rasterisation |
+| WARP can appear as a Vulkan device via Dozen | Mesa Dozen (Vulkan→D3D12) wraps WARP; only visible when no hardware Vulkan ICD is present |
 
 These results demonstrate that **API overhead, memory placement, and hardware architecture** all significantly affect GPU compute performance — and that the optimal configuration depends on workload complexity and hardware topology.

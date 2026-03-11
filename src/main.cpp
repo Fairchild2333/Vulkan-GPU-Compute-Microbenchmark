@@ -150,12 +150,15 @@ static std::vector<GpuInfo> ProbeGpus() {
                 VkPhysicalDeviceProperties props{};
                 vkGetPhysicalDeviceProperties(dev, &props);
 
+                bool vkIsSoftware = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
+
                 // Match Vulkan device to an existing DXGI entry by name.
                 bool matched = false;
                 for (auto& gpu : gpus) {
                     if (gpu.name.find(props.deviceName) != std::string::npos ||
                         std::string(props.deviceName).find(gpu.name) != std::string::npos) {
                         gpu.supportsVulkan = true;
+                        if (vkIsSoftware) gpu.isSoftware = true;
                         matched = true;
                         break;
                     }
@@ -165,8 +168,6 @@ static std::vector<GpuInfo> ProbeGpus() {
                     std::string vkName(props.deviceName);
                     for (auto& gpu : gpus) {
                         if (!gpu.isSoftware && !gpu.supportsVulkan) {
-                            // Check if either name contains a significant
-                            // portion of the other (e.g. "RTX 5090" in both).
                             if (vkName.size() > 6 && gpu.name.size() > 6) {
                                 std::string shortVk = vkName.substr(0, vkName.size() / 2);
                                 if (gpu.name.find(shortVk) != std::string::npos) {
@@ -182,6 +183,7 @@ static std::vector<GpuInfo> ProbeGpus() {
                     GpuInfo info;
                     info.name = props.deviceName;
                     info.supportsVulkan = true;
+                    info.isSoftware = vkIsSoftware;
                     info.supportsDX11 = false;
                     info.supportsDX12 = false;
                     gpus.push_back(info);
@@ -218,6 +220,8 @@ static void PrintGpuTable(const std::vector<GpuInfo>& gpus) {
     for (std::uint32_t i = 0; i < gpus.size(); ++i) {
         const auto& g = gpus[i];
         std::string label = g.name;
+        if (g.isSoftware) label += " (Software)";
+        else               label += " (Hardware)";
         if (label.size() > 42) label = label.substr(0, 39) + "...";
 
         std::cout << "  [" << i << "] " << label;
@@ -288,7 +292,7 @@ int main(int argc, char* argv[]) {
                       << "  --no-time-limit                     Run until window is closed\n"
                       << "  --benchmark [frames]                Run benchmark (default: 2000 frames), then exit\n"
                       << "  --help                              Show this help\n\n"
-                      << "Available backends:";
+                      << "Available Graphics APIs:";
 #ifdef HAVE_VULKAN
             std::cout << " vulkan";
 #endif
@@ -316,20 +320,47 @@ int main(int argc, char* argv[]) {
     // Wrapped in a loop so the user can go back from GPU selection to the
     // backend menu by typing "b".
 
-    // Build the list of available backends once.
-    std::vector<std::string> available;
+    // Build the list of available backends, sorted so that hardware-
+    // accelerated options appear first (Vulkan > DX12 > DX11 > Metal),
+    // followed by software-only fallbacks in the same API priority order.
+    struct BackendEntry { std::string id; bool hwOnly; };
+    std::vector<BackendEntry> hwBackends, swBackends;
+
+    auto hasHwSupport = [&](auto pred) {
+        for (const auto& g : gpus) if (!g.isSoftware && pred(g)) return true;
+        return false;
+    };
+    auto hasSwSupport = [&](auto pred) {
+        for (const auto& g : gpus) if (g.isSoftware && pred(g)) return true;
+        return false;
+    };
+
+    struct ApiProbe { const char* id; bool (*pred)(const GpuInfo&); };
+    ApiProbe probes[] = {
 #ifdef HAVE_VULKAN
-    for (const auto& g : gpus) { if (g.supportsVulkan) { available.push_back("vulkan"); break; } }
+        {"vulkan", [](const GpuInfo& g){ return g.supportsVulkan; }},
 #endif
 #ifdef HAVE_DX12
-    for (const auto& g : gpus) { if (g.supportsDX12)  { available.push_back("dx12");   break; } }
+        {"dx12",   [](const GpuInfo& g){ return g.supportsDX12; }},
 #endif
 #ifdef HAVE_DX11
-    available.push_back("dx11");
+        {"dx11",   [](const GpuInfo& g){ return g.supportsDX11; }},
 #endif
 #ifdef HAVE_METAL
-    for (const auto& g : gpus) { if (g.supportsMetal) { available.push_back("metal");  break; } }
+        {"metal",  [](const GpuInfo& g){ return g.supportsMetal; }},
 #endif
+    };
+
+    for (const auto& p : probes) {
+        bool hw = hasHwSupport(p.pred);
+        bool sw = hasSwSupport(p.pred);
+        if (hw)       hwBackends.push_back({p.id, true});
+        else if (sw)  swBackends.push_back({p.id, false});
+    }
+
+    std::vector<BackendEntry> available;
+    available.insert(available.end(), hwBackends.begin(), hwBackends.end());
+    available.insert(available.end(), swBackends.begin(), swBackends.end());
 
     while (true) {
         std::string selectedBackend = backend;
@@ -337,25 +368,35 @@ int main(int argc, char* argv[]) {
 
         // -- Interactive backend selection (only when --backend auto) --
         if (selectedBackend == "auto") {
-            std::cout << "Available backends:\n";
-            for (std::uint32_t i = 0; i < available.size(); ++i) {
-                std::string note;
-                if (available[i] == "vulkan")  note = "Vulkan 1.2";
-                else if (available[i] == "dx12")  note = "DirectX 12";
-                else if (available[i] == "dx11")  note = "DirectX 11";
-                else if (available[i] == "metal") note = "Metal";
-                std::cout << "  [" << i << "] " << note << "\n";
-            }
-
             if (available.empty()) {
-                std::cerr << "No backend available.\n";
+                std::cerr << "No Graphics API available.\n";
                 return 1;
             }
 
-            std::cout << "Select backend [0-" << (available.size() - 1)
-                      << "] (default: 0): " << std::flush;
+            // Find the best default: first hardware backend, else first overall.
+            std::uint32_t defaultChoice = 0;
+            for (std::uint32_t i = 0; i < available.size(); ++i) {
+                if (available[i].hwOnly) { defaultChoice = i; break; }
+            }
+
+            std::cout << "Available Graphics APIs:\n";
+            for (std::uint32_t i = 0; i < available.size(); ++i) {
+                std::string note;
+                if (available[i].id == "vulkan")  note = "Vulkan 1.2";
+                else if (available[i].id == "dx12")  note = "DirectX 12";
+                else if (available[i].id == "dx11")  note = "DirectX 11";
+                else if (available[i].id == "metal") note = "Metal";
+                if (!available[i].hwOnly)
+                    note += "  [Software only - runs on CPU]";
+                if (i == defaultChoice)
+                    note += "  <- default";
+                std::cout << "  [" << i << "] " << note << "\n";
+            }
+
+            std::cout << "Select Graphics API [0-" << (available.size() - 1)
+                      << "] (default: " << defaultChoice << "): " << std::flush;
             std::string line;
-            std::uint32_t choice = 0;
+            std::uint32_t choice = defaultChoice;
             if (std::getline(std::cin, line) && !line.empty()) {
                 choice = static_cast<std::uint32_t>(std::stoi(line));
                 if (choice >= available.size()) {
@@ -363,8 +404,8 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
             }
-            selectedBackend = available[choice];
-            std::cout << "[Backend] Selected: " << selectedBackend << std::endl;
+            selectedBackend = available[choice].id;
+            std::cout << "[Graphics API] Selected: " << selectedBackend << std::endl;
         }
 
         if (warp && selectedBackend != "dx11" && selectedBackend != "dx12") {
@@ -427,7 +468,7 @@ int main(int argc, char* argv[]) {
 #endif
 
             if (!app) {
-                std::cerr << "Backend '" << selectedBackend
+                std::cerr << "Graphics API '" << selectedBackend
                           << "' is not compiled in or failed to initialise.\n";
                 return 1;
             }
@@ -447,7 +488,7 @@ int main(int argc, char* argv[]) {
             break;  // Normal exit after the window closes.
 
         } catch (const gpu_bench::BackToMenuException&) {
-            std::cout << "\nReturning to backend selection...\n" << std::endl;
+            std::cout << "\nReturning to Graphics API selection...\n" << std::endl;
             backend = "auto";  // Force re-display of the menu.
             continue;
         } catch (const std::exception& ex) {
