@@ -313,9 +313,9 @@ RDNA 2, by contrast, uses a scalar + SIMD32 design where each compute unit conta
 
 **Compute shader support maturity.** The HD 5770 was designed primarily for DirectX 11-era pixel and vertex shading. Its compute shader support (DirectCompute 5.0) was a first-generation implementation with limited occupancy, no asynchronous compute queues, and restricted shared memory bandwidth. RDNA 2 treats compute as a first-class workload with dedicated hardware schedulers, LDS (Local Data Share) bandwidth matched to ALU throughput, and fine-grained wave management.
 
-**Driver optimisation.** AMD's current Radeon Software drivers for RDNA 2 are actively maintained and optimised. The HD 5770's legacy Catalyst drivers (version 15.301, circa 2015) have not received performance updates in over a decade. Compute shader code generation for TeraScale 2 was never a priority — these drivers were written when GPU compute was still in its infancy.
+**Driver optimisation.** AMD's current Radeon Software drivers for RDNA 2 are actively maintained and optimised. The HD 5770's legacy Crimson drivers (version 16.2.1, Mar 2016) have not received performance updates in over a decade (real 10 years, now it's Mar 2026). Compute shader code generation for TeraScale 2 was never a priority — these drivers were written when GPU compute was still in its infancy.
 
-**Memory bandwidth parity.** The HD 5770's theoretical advantage in dedicated GDDR5 is largely neutralised here. Its 76.8 GB/s bandwidth is slightly below the iGPU's ~83 GB/s from dual-channel DDR5-5200. For a bandwidth-sensitive particle simulation, this effectively levels the playing field — or tilts it slightly in the iGPU's favour.
+**Memory bandwidth parity.** The HD 5770's theoretical advantage in dedicated GDDR5 is largely neutralised here. Its 76.8 GB/s bandwidth is slightly below the iGPU's ~83 GB/s from dual-channel DDR5-6000 C28. For a bandwidth-sensitive particle simulation, this effectively levels the playing field — or tilts it slightly in the iGPU's favour.
 
 ### 7e. Would the HD 5770 Win in a Gaming Benchmark?
 
