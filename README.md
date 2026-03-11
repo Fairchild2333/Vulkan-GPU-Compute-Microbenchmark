@@ -1,19 +1,21 @@
 # GPU Compute & Rendering Pipeline — Multi-Graphics API
 
-A real-time particle simulation using GPU compute shaders with four
-interchangeable rendering backends: **Vulkan**, **DirectX 12**,
-**DirectX 11**, and **Metal**. Each backend implements the same particle
-physics (Euler integration in a compute shader) and point-cloud rendering,
-with GPU timestamp profiling.
+A real-time particle simulation using GPU compute shaders with five
+interchangeable graphics API backends: **Vulkan**, **DirectX 12**,
+**DirectX 11**, **OpenGL 4.3**, and **Metal**. Each backend implements the
+same particle physics (Euler integration in a compute shader) and point-cloud
+rendering, with GPU timestamp profiling. Runs on **Windows**, **Linux**, and
+**macOS**.
 
 ## Supported Graphics APIs
 
 | Graphics API | API Level | Platforms | Notes |
 |---------|-----------|-----------|-------|
 | Vulkan  | 1.2       | Windows, Linux, HarmonyOS | Requires Vulkan SDK + ICD driver |
-| DX12    | Feature Level 11_0 | Windows 10+ | Best compatibility on Windows on ARM |
-| DX11    | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
-| Metal   | Metal 2+  | macOS (Apple Silicon / Intel) | Native Apple GPU API |
+| DirectX 12 | Feature Level 11_0+ | Windows 10+ | Tries FL 12_1→12_0→11_1→11_0; works on older GPUs too |
+| DirectX 11 | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
+| OpenGL  | 4.3 Core  | Windows, Linux, macOS (legacy) | Cross-platform fallback; requires `GL_ARB_compute_shader` |
+| Metal   | Metal 2+  | macOS (Apple/Intel) | Native Apple GPU API (Apple/AMD) — highest priority on macOS |
 
 ### HarmonyOS PC
 
@@ -28,13 +30,15 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 ├── CMakeLists.txt
 ├── README.md
 ├── src/
-│   ├── main.cpp              # Entry point — backend selection via --backend flag
-│   ├── app_base.h            # Shared base class (window, particles, timing)
-│   ├── app_base.cpp
-│   ├── vulkan_backend.h/cpp  # Vulkan backend
-│   ├── dx12_backend.h/cpp    # DirectX 12 backend
-│   ├── dx11_backend.h/cpp    # DirectX 11 backend
-│   └── metal_backend.h/mm   # Metal backend (Objective-C++)
+│   ├── main.cpp                # Entry point — interactive menu, GPU selection, CLI
+│   ├── app_base.h/cpp          # Shared base class (window, particles, timing)
+│   ├── benchmark_results.h/cpp # Result persistence, comparison tables, CSV export
+│   ├── gpu_common.h            # Shared types (BenchmarkConfig, BackToMenuException)
+│   ├── vulkan_backend.h/cpp    # Vulkan
+│   ├── dx12_backend.h/cpp      # DirectX 12
+│   ├── dx11_backend.h/cpp      # DirectX 11
+│   ├── opengl_backend.h/cpp    # OpenGL 4.3
+│   └── metal_backend.h/mm     # Metal (Objective-C++)
 ├── shaders/
 │   ├── compute.comp          # Vulkan GLSL compute shader
 │   ├── particle.vert         # Vulkan GLSL vertex shader
@@ -42,6 +46,9 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 │   ├── compute.hlsl          # DX12/DX11 compute shader
 │   ├── particle_vs.hlsl      # DX12/DX11 vertex shader
 │   ├── particle_ps.hlsl      # DX12/DX11 pixel shader
+│   ├── compute_gl.comp       # OpenGL 4.3 compute shader
+│   ├── particle_gl.vert      # OpenGL 4.3 vertex shader
+│   ├── particle_gl.frag      # OpenGL 4.3 fragment shader
 │   └── particle.metal        # Metal compute + vertex + fragment
 └── build/
 ```
@@ -50,16 +57,72 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 
 | Dependency | Install |
 |---|---|
-| **CMake 3.20+** | https://cmake.org/download/ |
-| **C++17 compiler** | MSVC (Visual Studio 2019+), Clang, or Apple Clang |
-| **GLFW** | `vcpkg install glfw3` or `brew install glfw` |
-| **Vulkan SDK** (optional) | [LunarG](https://vulkan.lunarg.com/sdk/home) |
+| **CMake 3.20+** | https://cmake.org/download/ or system package manager |
+| **C++17 compiler** | MSVC (Visual Studio 2019+), GCC 8+, Clang, or Apple Clang |
+| **GLFW** | `vcpkg install glfw3` / `brew install glfw` / `sudo apt install libglfw3-dev` |
+| **Vulkan SDK** (optional) | [LunarG](https://vulkan.lunarg.com/sdk/home) or `sudo apt install libvulkan-dev` |
 | **Windows SDK** (for DX) | Included with Visual Studio |
 | **Xcode CLT** (for Metal) | `xcode-select --install` (macOS) |
 
-### Windows on ARM
+### Linux
+
+> **Tested on Ubuntu.** Fedora and Arch commands are provided for
+> convenience but have not been verified by the author.
+
+**Ubuntu / Debian** (`apt`):
+
+```bash
+sudo apt install build-essential cmake libglfw3-dev libgl-dev
+sudo apt install libvulkan-dev vulkan-tools glslc   # optional, for Vulkan backend
+```
+
+**Fedora / RHEL** (`dnf`):
+
+```bash
+sudo dnf install gcc-c++ cmake glfw-devel mesa-libGL-devel
+sudo dnf install vulkan-loader-devel vulkan-tools glslc   # optional, for Vulkan backend
+```
+
+**Arch / Manjaro** (`pacman`):
+
+```bash
+sudo pacman -S base-devel cmake glfw-x11 mesa
+sudo pacman -S vulkan-icd-loader vulkan-tools shaderc   # optional, for Vulkan backend
+```
+
+At least one of the OpenGL (`libgl-dev` / `mesa-libGL-devel` / `mesa`) or
+Vulkan development packages must be installed — otherwise no backend will be
+available. DirectX and Metal backends are automatically disabled on Linux.
+
+| Backend | Available on Linux | Driver Requirement |
+|---------|-------------------|--------------------|
+| Vulkan  | Yes (with `libvulkan-dev`) | Mesa or NVIDIA proprietary driver |
+| OpenGL 4.3 | Yes (with `libgl-dev`) | Mesa or NVIDIA proprietary driver |
+| DirectX 11/12 | No | Windows only |
+| Metal | No | macOS only |
+
+**GPU selection for OpenGL:** On Linux, the application uses the `DRI_PRIME`
+environment variable to route OpenGL to the user's chosen GPU. This is set
+automatically when a GPU is selected via the interactive menu or `--gpu`.
+You can also set it manually:
+
+```bash
+DRI_PRIME=1 ./build/gpu_benchmark --backend opengl   # use secondary GPU
+```
+
+For NVIDIA proprietary drivers, use:
+
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ./build/gpu_benchmark --backend opengl
+```
+
+### Windows (x64 / ARM64)
 
 ```powershell
+# x64
+vcpkg install glfw3
+
+# ARM64
 vcpkg install glfw3:arm64-windows
 ```
 
@@ -77,6 +140,18 @@ The Metal backend uses the system Metal framework — no additional SDK or
 driver installation is needed.
 
 ## Build
+
+### Verify Environment (Linux)
+
+```bash
+cmake --version    # Should be 3.20+
+g++ --version      # GCC 8+ or clang++ 7+
+pkg-config --modversion glfw3   # Should print 3.x
+glslc --version    # Optional — only required for the Vulkan backend
+```
+
+If `glslc` is not found and you need the Vulkan backend, install the LunarG
+Vulkan SDK or `sudo apt install glslc`.
 
 ### Verify Environment (Windows)
 
@@ -109,6 +184,29 @@ clang --version   # Apple Clang (comes with Xcode Command Line Tools)
 ```
 
 If `cmake` is not found, install it via Homebrew: `brew install cmake`.
+
+### Build Steps (Linux)
+
+```bash
+# Configure (backends auto-detected based on installed packages)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+# Build
+cmake --build build
+
+# Run
+./build/gpu_benchmark
+```
+
+CMake will print which backends are enabled during configuration:
+
+```
+-- Vulkan backend: ENABLED
+-- DX12 backend:   DISABLED (not Windows)
+-- DX11 backend:   DISABLED (not Windows)
+-- Metal backend:  DISABLED (not macOS)
+-- OpenGL backend: ENABLED
+```
 
 ### Build Steps (Windows)
 
@@ -143,17 +241,29 @@ cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENAB
 
 ```powershell
 # Windows (PowerShell)
-.\build\Release\gpu_benchmark.exe                         # auto-select backend
-.\build\Release\gpu_benchmark.exe --backend vulkan         # force Vulkan
+.\build\Release\gpu_benchmark.exe                         # interactive menu
+.\build\Release\gpu_benchmark.exe --backend vulkan         # force Vulkan (skip menu)
 .\build\Release\gpu_benchmark.exe --backend dx12           # force DX12
 .\build\Release\gpu_benchmark.exe --backend dx11           # force DX11
 .\build\Release\gpu_benchmark.exe --backend dx12 --gpu 1   # DX12 + specific GPU
+
+# Result management
+.\build\Release\gpu_benchmark.exe --results                # list saved results
+.\build\Release\gpu_benchmark.exe --compare                # compare all results
+.\build\Release\gpu_benchmark.exe --compare <id1> <id2>    # detailed side-by-side
+.\build\Release\gpu_benchmark.exe --results-export out.csv  # export to CSV
 ```
 
 ```bash
+# Linux
+./build/gpu_benchmark                                # interactive menu
+./build/gpu_benchmark --backend vulkan               # force Vulkan
+./build/gpu_benchmark --backend opengl               # force OpenGL
+./build/gpu_benchmark --backend opengl --gpu 1       # OpenGL on second GPU (sets DRI_PRIME)
+
 # macOS
-./build/gpu_benchmark                                # auto-selects Metal
-./build/gpu_benchmark --backend metal                # force Metal
+./build/gpu_benchmark                                # interactive menu
+./build/gpu_benchmark --backend metal                # force Metal (skip menu)
 ./build/gpu_benchmark --backend vulkan               # force Vulkan (needs MoltenVK)
 
 # Help
@@ -165,8 +275,9 @@ cmake -S . -B build -DENABLE_VULKAN=OFF -DENABLE_DX12=ON -DENABLE_DX11=ON -DENAB
 When no `--backend` is specified, the application probes backends in order
 and falls back to the next if the current one fails to initialise:
 
-**macOS:** Metal → Vulkan
-**Windows:** Vulkan → DX12 → DX11
+**macOS:** Metal → Vulkan → OpenGL
+**Linux:** Vulkan → OpenGL
+**Windows:** Vulkan → DX12 → DX11 → OpenGL
 
 Each fallback is logged to the terminal:
 
@@ -249,6 +360,7 @@ All four backends collect per-frame GPU timestamps:
 | Vulkan  | `vkCmdWriteTimestamp` query pool (4 timestamps per frame) |
 | DX12    | `ID3D12GraphicsCommandList::EndQuery` timestamp heap |
 | DX11    | `ID3D11Query` with `D3D11_QUERY_TIMESTAMP` |
+| OpenGL  | `glQueryCounter` with `GL_TIMESTAMP` (4 queries per frame, ring buffer) |
 | Metal   | `MTLCommandBuffer.GPUStartTime` / `GPUEndTime` on separate compute & render command buffers |
 
 Every second the application prints averaged timing to stdout:
@@ -268,15 +380,15 @@ MTL_HUD_ENABLED=1 ./build/gpu_benchmark --backend metal
 ## Architecture
 
 ```
-            ┌──────────┐
-            │ AppBase  │  window, particles, timing
-            └────┬─────┘
-      ┌──────┬───┴───┬───────┐
-      │      │       │       │
-┌─────┴──┐ ┌┴────┐ ┌┴─────┐ ┌┴─────┐
-│ Vulkan │ │ DX12│ │ DX11 │ │Metal │
-│Backend │ │Back.│ │Back. │ │Back. │
-└────────┘ └─────┘ └──────┘ └──────┘
+               ┌──────────┐
+               │ AppBase  │  window, particles, timing
+               └────┬─────┘
+      ┌──────┬──┴──┬──────┬────────┐
+      │      │     │      │        │
+┌─────┴──┐ ┌┴───┐ ┌┴────┐ ┌┴──────┐ ┌┴─────┐
+│ Vulkan │ │DX12│ │DX11 │ │OpenGL │ │Metal │
+│Backend │ │Back│ │Back │ │Back.  │ │Back. │
+└────────┘ └────┘ └─────┘ └───────┘ └──────┘
 ```
 
 Each backend overrides:
@@ -295,24 +407,46 @@ Each backend overrides:
 - [x] Benchmark mode with standardised report output
 - [x] Multi-GPU selection (`--gpu` flag)
 - [x] HarmonyOS (OHOS) Vulkan port via XComponent
-
-### In Progress / Planned
+- [x] Benchmark result history — auto-save, list, compare, delete, CSV export
+- [x] Interactive main menu with quick run / custom run / comparison / delete
+- [x] OpenGL 4.3 compute shader backend with GLAD2 loader
 
 #### Benchmark Result History
 
-Persist benchmark results to a local JSON file so users can track and compare
-performance over time:
+Results are automatically saved to `~/.gpu_bench/results.json` after each run.
+Full metrics are persisted: graphics API, GPU, CPU, particle count, difficulty,
+timing breakdown (compute / render / total GPU), FPS, and bottleneck analysis.
 
-- **Auto-save** — after each benchmark run, append the full summary (API,
-  GPU, CPU, particle count, difficulty, timing breakdown, FPS) to
-  `~/.gpu_bench/results.json`.
-- **List results** — `--results` flag prints a table of all saved runs,
-  sorted by date, with key metrics (API, GPU, difficulty, Avg FPS, Avg GPU
-  time).
-- **Delete results** — `--results-delete <id>` removes a specific entry;
-  `--results-clear` wipes the entire history.
-- **Export** — `--results-export <path>` writes the history to a
-  user-specified CSV or JSON file for external analysis.
+| Feature | Interactive | CLI |
+|---------|-----------|-----|
+| List all results | Main menu → Delete results | `--results` |
+| Compare (ranked table) | Main menu → Compare results | `--compare` |
+| Detailed side-by-side | Compare → enter two rank #s | `--compare <id1> <id2>` |
+| Delete one result | Delete → enter ID | `--results-delete <id>` |
+| Clear all results | Delete → type `all` | `--results-clear` |
+| Export to CSV | — | `--results-export <file.csv>` |
+
+#### Interactive Main Menu
+
+On startup (when no CLI flags are given), the application presents:
+
+```
+========== GPU Benchmark ==========
+  [0] Quick run (Vulkan 1.2 / RTX 5090 / Medium)  <- default
+  [1] Custom run (choose API / GPU / difficulty)
+  [2] Run again (same settings)
+  [3] Compare results (N saved)
+  [4] Delete results
+  [5] Exit
+====================================
+```
+
+- **Quick run** auto-selects the best GPU (discrete > integrated > software)
+  and the best API that GPU supports (Vulkan > DX12 > DX11 > Metal).
+- **Run again** appears after the first run and reuses the previous settings.
+- After each run the menu reappears — no need to restart the application.
+
+### In Progress / Planned
 
 #### Web Backend — WebGL / WebGPU
 
@@ -325,21 +459,6 @@ Browser-based port of the particle benchmark, inspired by projects such as
   drivers or SDKs.
 - Cross-platform, cross-system league table comparing results from native
   backends (Vulkan / DX / Metal) against web backends on the same hardware.
-
-#### OpenGL 4.3 Backend
-
-Add an OpenGL compute-shader backend to complement the existing API coverage:
-
-- **OpenGL 4.3+** with `GL_ARB_compute_shader` for particle simulation and
-  traditional vertex/fragment rendering for display.
-- Compute dispatch via `glDispatchCompute`, particle SSBO shared between
-  compute and draw passes.
-- GPU timestamp queries using `GL_ARB_timer_query` (`glQueryCounter` /
-  `glGetQueryObjectui64v`).
-- Cross-platform support: runs on Windows, Linux, and macOS (legacy profile)
-  without requiring Vulkan or DirectX drivers.
-- Enables direct comparison of OpenGL's implicit driver model against DX11
-  (similar overhead profile) and against explicit APIs (Vulkan / DX12).
 
 #### Cross-Platform & Cross-GPU Performance Comparison
 

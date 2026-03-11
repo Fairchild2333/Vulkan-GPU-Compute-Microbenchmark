@@ -26,6 +26,7 @@ public:
 
     virtual std::string GetBackendName() const = 0;
     virtual std::string GetDeviceName() const  = 0;
+    virtual bool NeedsOpenGLContext() const { return false; }
 
 protected:
     virtual void InitBackend()            = 0;

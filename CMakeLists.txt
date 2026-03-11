@@ -19,6 +19,7 @@ if(APPLE)
 else()
     option(ENABLE_METAL "Build with Metal backend (macOS only)" OFF)
 endif()
+option(ENABLE_OPENGL "Build with OpenGL 4.3 backend" ON)
 
 # ---- GLFW (required by all backends for windowing) ----
 find_package(glfw3 REQUIRED)
@@ -103,6 +104,31 @@ else()
     message(STATUS "Metal backend:  DISABLED (by option)")
 endif()
 
+# ---- OpenGL backend (cross-platform, lowest API priority) ----
+if(ENABLE_OPENGL)
+    find_package(OpenGL QUIET)
+    if(OpenGL_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            glad
+            GIT_REPOSITORY https://github.com/Dav1dde/glad.git
+            GIT_TAG        v2.0.8
+            SOURCE_SUBDIR  cmake
+        )
+        FetchContent_MakeAvailable(glad)
+        glad_add_library(glad_gl43 STATIC API gl:core=4.3)
+
+        list(APPEND BACKEND_SOURCES src/opengl_backend.cpp)
+        list(APPEND BACKEND_LIBS    OpenGL::GL glad_gl43)
+        list(APPEND BACKEND_DEFS    HAVE_OPENGL)
+        message(STATUS "OpenGL backend: ENABLED")
+    else()
+        message(STATUS "OpenGL backend: DISABLED (OpenGL not found)")
+    endif()
+else()
+    message(STATUS "OpenGL backend: DISABLED (by option)")
+endif()
+
 # ---- Executable ----
 add_executable(gpu_benchmark ${COMMON_SOURCES} ${BACKEND_SOURCES})
 
@@ -172,5 +198,18 @@ if(ENABLE_METAL AND APPLE AND METAL_FRAMEWORK)
             ${CMAKE_SOURCE_DIR}/shaders/particle.metal
             $<TARGET_FILE_DIR:gpu_benchmark>
         COMMENT "Copying Metal shader file next to executable"
+    )
+endif()
+
+# ---- Copy OpenGL GLSL shader files next to executable ----
+if(ENABLE_OPENGL AND OpenGL_FOUND)
+    set(GL_SHADERS
+        ${CMAKE_SOURCE_DIR}/shaders/compute_gl.comp
+        ${CMAKE_SOURCE_DIR}/shaders/particle_gl.vert
+        ${CMAKE_SOURCE_DIR}/shaders/particle_gl.frag
+    )
+    add_custom_command(TARGET gpu_benchmark POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GL_SHADERS} $<TARGET_FILE_DIR:gpu_benchmark>
+        COMMENT "Copying OpenGL GLSL shader files next to executable"
     )
 endif()

@@ -74,6 +74,8 @@ private:
     bool tearingSupported_       = false;
     bool timestampDiagPrinted_   = false;
     UINT timestampFrameCount_    = 0;
+    UINT disjointFailCount_      = 0;
+    UINT64 lastGoodFrequency_    = 0;
     std::uint32_t currentFrame_  = 0;
 };
 

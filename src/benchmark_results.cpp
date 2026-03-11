@@ -345,21 +345,22 @@ void PrintResultsTable(const std::vector<BenchmarkResult>& results) {
         "==========================================================\n\n";
 
     std::cout << std::left
-              << std::setw(22) << "ID"
+              << std::setw(4)  << "#"
               << std::setw(8)  << "API"
               << std::setw(28) << "Device"
               << std::setw(10) << "Difficulty"
               << std::setw(10) << "Avg FPS"
               << std::setw(12) << "GPU Avg(ms)"
               << "\n";
-    std::cout << std::string(90, '-') << "\n";
+    std::cout << std::string(72, '-') << "\n";
 
-    for (const auto& r : results) {
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        const auto& r = results[i];
         std::string dev = r.deviceName;
         if (dev.size() > 26) dev = dev.substr(0, 23) + "...";
 
         std::cout << std::left
-                  << std::setw(22) << r.id
+                  << std::setw(4)  << (i + 1)
                   << std::setw(8)  << r.graphicsApi
                   << std::setw(28) << dev
                   << std::setw(10) << r.difficulty

@@ -89,7 +89,17 @@ void AppBase::InitWindow() {
         throw std::runtime_error("glfwInit failed");
     }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    if (NeedsOpenGLContext()) {
+        glfwWindowHint(GLFW_CLIENT_API,            GLFW_OPENGL_API);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,  4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,  3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE,         GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT,  GL_TRUE);
+#endif
+    } else {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    }
     glfwWindowHint(GLFW_RESIZABLE,  GLFW_FALSE);
     glfwWindowHint(GLFW_VISIBLE,    GLFW_FALSE);
 

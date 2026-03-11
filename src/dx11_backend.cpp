@@ -395,46 +395,62 @@ void DX11Backend::CreateTimestampQueries() {
 
 void DX11Backend::CollectTimestampResults() {
     if (!timestampsSupported_) return;
-
-    // Wait until we have submitted enough frames to fill the ring buffer
     if (timestampFrameCount_ < kTimestampSlotCount) return;
 
     UINT readSlot = (currentFrame_ + 1) % kTimestampSlotCount;
 
+    // --- Read disjoint query (with retries + Sleep for slow drivers) ---
     D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
     HRESULT hr = context_->GetData(disjointQueries_[readSlot].Get(),
                                    &disjoint, sizeof(disjoint), 0);
-    if (hr != S_OK) {
-        if (!timestampDiagPrinted_) {
-            std::cout << "[Profiling] DX11 disjoint GetData hr=0x"
-                      << std::hex << hr << std::dec
-                      << " slot=" << readSlot
-                      << " frame=" << timestampFrameCount_ << std::endl;
-            timestampDiagPrinted_ = true;
-        }
-        return;
-    }
-    if (disjoint.Disjoint) {
-        if (!timestampDiagPrinted_) {
-            std::cout << "[Profiling] DX11 disjoint=TRUE slot="
-                      << readSlot << std::endl;
-            timestampDiagPrinted_ = true;
-        }
-        return;
+    for (int retry = 0; retry < 128 && hr == S_FALSE; ++retry) {
+        if (retry % 32 == 31) Sleep(1);
+        hr = context_->GetData(disjointQueries_[readSlot].Get(),
+                               &disjoint, sizeof(disjoint),
+                               D3D11_ASYNC_GETDATA_DONOTFLUSH);
     }
 
+    if (hr != S_OK) {
+        ++disjointFailCount_;
+        if (disjointFailCount_ > kTimestampSlotCount * 4) {
+            // Driver never produces results — stop trying.
+            timestampsSupported_ = false;
+            std::cout << "[Profiling] DX11 timestamps permanently unavailable "
+                         "(driver never resolves queries).\n";
+        }
+        return;
+    }
+    disjointFailCount_ = 0;
+
+    // Determine frequency: prefer this frame's, fall back to last good one.
+    UINT64 freq = disjoint.Frequency;
+    if (disjoint.Disjoint) {
+        // GPU clock changed mid-frame.  Timestamps may be less accurate
+        // but are still usable with the last known stable frequency.
+        if (lastGoodFrequency_ > 0)
+            freq = lastGoodFrequency_;
+        // else: first frame and already disjoint — use reported freq anyway
+    } else {
+        lastGoodFrequency_ = freq;
+    }
+
+    if (freq == 0) return;
+
+    // --- Read individual timestamps (with retries) ---
     UINT64 ts[kTimestampsPerFrame]{};
     for (UINT i = 0; i < kTimestampsPerFrame; ++i) {
         hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
                                &ts[i], sizeof(UINT64), 0);
-        for (int retry = 0; retry < 64 && hr == S_FALSE; ++retry)
+        for (int retry = 0; retry < 128 && hr == S_FALSE; ++retry) {
+            if (retry % 32 == 31) Sleep(1);
             hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
                                    &ts[i], sizeof(UINT64),
                                    D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        }
         if (hr != S_OK) return;
     }
 
-    double toMs = 1000.0 / static_cast<double>(disjoint.Frequency);
+    double toMs = 1000.0 / static_cast<double>(freq);
     AccumulateTiming(
         static_cast<double>(ts[1] - ts[0]) * toMs,
         static_cast<double>(ts[3] - ts[2]) * toMs,

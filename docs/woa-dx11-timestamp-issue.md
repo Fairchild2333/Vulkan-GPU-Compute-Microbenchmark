@@ -1,15 +1,18 @@
-# DX11 GPU Timestamp Queries Unavailable on Windows on ARM (SVGAMPWDDM)
+# DX11 Timestamp Queries Unavailable on Virtual GPU (Windows on ARM)
 
 ## Environment
 
 | Component | Value |
 |-----------|-------|
-| Device | Huawei MateBook E (Qualcomm Snapdragon 850) |
-| GPU | SVGAMPWDDM Device (Hardware), 2304 MB VRAM |
+| Host CPU | Qualcomm Snapdragon 8cx Gen3 |
+| Hypervisor | StratoVirt (Huawei virtualisation engine) |
+| Virtual GPU | SVGAMFM53M Device, 2504 MB VRAM |
 | Feature Level | D3D_FEATURE_LEVEL_11_1 |
-| Driver Type | Hardware |
-| OS | Windows 11 ARM64 |
-| CPU | StratoVirt (reported by OS) |
+| DX12 Support | Disabled (virtual GPU driver does not implement D3D12) |
+| OS | Windows 11 ARM64 (Build 26100) |
+| System Model | Virtual Machine (VirtualBox/StratoVirt) |
+
+> **Note:** The `SVGA`-prefixed GPU name indicates a **virtual machine display adapter** (VMware/VirtualBox lineage), not a native Qualcomm Adreno GPU. The host device's physical GPU is not directly exposed to the VM.
 
 ## Symptom
 
@@ -35,11 +38,13 @@ No per-frame compute/render/total GPU timing is recorded.
 
 ## Root Cause
 
-The D3D11 specification allows drivers to **silently accept** timestamp query creation but **never produce valid results**. The `SVGAMPWDDM` driver (Qualcomm's generic ARM GPU driver for Windows) appears to fall into this category — it exposes Feature Level 11_1 and creates query objects without error, but the underlying GPU or driver does not implement the hardware counters needed to resolve timestamp queries.
+The D3D11 specification allows drivers to **silently accept** timestamp query creation but **never produce valid results**. The virtual GPU driver (`SVGAMFM53M` / `SVGAMPWDDM`) falls into this category — it exposes Feature Level 11_1 and creates query objects without error, but does not implement the hardware performance counters required to resolve timestamp queries.
 
-This is consistent with the DX11 documentation:
+This is consistent with the D3D11 documentation:
 
 > `ID3D11DeviceContext::GetData` returns `S_FALSE` if the data is not yet available. [...] If the query was created with `D3D11_QUERY_TIMESTAMP_DISJOINT`, the driver may return `S_FALSE` indefinitely if timestamp queries are not supported by the hardware.
+
+**Key distinction:** On the same PC (AMD Ryzen 9800X3D), WARP running DX11 **does** produce valid timestamps. This confirms the issue is specific to the WoA VM's virtual GPU driver, not to software rendering in general.
 
 ## Impact
 
@@ -51,16 +56,26 @@ This is consistent with the DX11 documentation:
 
 | API | Timestamp Support | Notes |
 |-----|-------------------|-------|
-| DX11 (Hardware GPU) | Query created OK, `GetData` returns `S_FALSE` forever | Driver accepts but never resolves |
-| DX12 (WARP) | Hardware GPU does not support DX12; WARP provides timestamps | Software renderer, runs on CPU |
-| Vulkan (WARP via Dozen) | Dozen translates to DX12 WARP | Software renderer, runs on CPU |
+| DX11 (Virtual GPU) | `CreateQuery` succeeds, `GetData` returns `S_FALSE` forever | Driver accepts but never resolves |
+| DX12 (WARP) | Timestamps available via WARP | Virtual GPU does not support DX12; WARP provides software DX12 with working timestamps |
+| Vulkan (Dozen → WARP) | Timestamps available via Dozen + WARP | Dozen translates Vulkan to DX12, WARP executes on CPU |
+
+DX12 and Vulkan timestamps work because they both go through **WARP** (Microsoft's CPU-based software rasteriser), which fully implements timestamp queries. The DX11 path is the only one that hits the virtual GPU driver directly, where the implementation is incomplete.
 
 ## Workaround
 
-No application-level workaround exists — the driver simply does not produce timestamp data. The application already handles this gracefully by checking `GetData` return values and skipping GPU timing when unavailable.
+No application-level workaround exists — the virtual GPU driver simply does not produce timestamp data. The application already handles this gracefully by checking `GetData` return values and skipping GPU timing when unavailable.
 
-For GPU profiling on this class of device, the only option is to use an external tool such as [GPUView](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/gpuview) or [PIX on Windows](https://devblogs.microsoft.com/pix/), though ARM64 support for these tools may be limited.
+Alternative approaches on this class of device:
+- **Use DX12 or Vulkan** — both route through WARP, which provides working timestamp queries at the cost of running entirely on the CPU.
+- **External tools** — [GPUView](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/gpuview) or [PIX on Windows](https://devblogs.microsoft.com/pix/) may provide some profiling data, though ARM64 support for these tools is limited.
 
 ## Affected Devices
 
-This issue is expected on any Windows on ARM device using the `SVGAMPWDDM` driver (generic Qualcomm/ARM GPU adapter) that lacks native DX12 or Vulkan support. Devices with Qualcomm Adreno drivers (e.g. Snapdragon X Elite with proper Adreno GPU driver) are not affected, as those drivers implement timestamp queries correctly.
+This issue is expected on any system where DX11 runs on a **virtual GPU driver** that does not implement timestamp hardware counters:
+
+- **VirtualBox / VMware VMs** on Windows on ARM (SVGA-prefixed display adapters)
+- **Hyper-V VMs** with the Basic Display Adapter (non-GPU-PV configurations)
+- Any WoA device where the GPU driver exposes DX11 Feature Level 11_x but lacks timestamp counter support
+
+Devices with **native GPU drivers** (e.g. Qualcomm Adreno on Snapdragon X Elite, NVIDIA, AMD discrete/integrated) are not affected — their drivers implement DX11 timestamp queries correctly.

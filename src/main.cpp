@@ -13,11 +13,17 @@
 #ifdef HAVE_METAL
 #include "metal_backend.h"
 #endif
+#ifdef HAVE_OPENGL
+#include "opengl_backend.h"
+#endif
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -26,11 +32,23 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 #pragma comment(lib, "dxgi.lib")
+
+// Hint NVIDIA Optimus and AMD Switchable Graphics to prefer the discrete GPU
+// for OpenGL contexts.  These must be exported from the final executable.
+extern "C" {
+    __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+    __declspec(dllexport) int   AmdPowerXpressRequestHighPerformance = 1;
+}
 #endif
 
 #ifdef HAVE_VULKAN
 #include <vulkan/vulkan.h>
 #endif
+
+static bool SafeStoi(const std::string& s, int& out) {
+    try { out = std::stoi(s); return true; }
+    catch (...) { return false; }
+}
 
 static std::string ExeDirectory(const char* argv0) {
     std::string path(argv0);
@@ -73,6 +91,7 @@ struct GpuInfo {
     bool supportsDX12   = false;
     bool supportsDX11   = true;   // virtually everything supports DX11
     bool supportsMetal  = false;
+    bool supportsOpenGL = false;
 };
 
 static std::vector<GpuInfo> ProbeGpus() {
@@ -228,6 +247,85 @@ static std::vector<GpuInfo> ProbeGpus() {
     }
 #endif
 
+    // --- OpenGL 4.3 probe (if compiled in) ---
+#ifdef HAVE_OPENGL
+    {
+        if (glfwInit() == GLFW_FALSE)
+            return gpus;  // GLFW not available — skip OpenGL probe
+
+        glfwDefaultWindowHints();
+        glfwWindowHint(GLFW_CLIENT_API,            GLFW_OPENGL_API);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,  4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,  3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE,         GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_VISIBLE,                GLFW_FALSE);
+#ifdef __APPLE__
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT,  GLFW_TRUE);
+#endif
+        GLFWwindow* probe = glfwCreateWindow(1, 1, "", nullptr, nullptr);
+        if (probe) {
+            glfwMakeContextCurrent(probe);
+
+            // Read GL_RENDERER for software detection and fallback GPU entry.
+            using GetStringFn = const unsigned char* (*)(unsigned int);
+            auto glGetStringFn = reinterpret_cast<GetStringFn>(
+                glfwGetProcAddress("glGetString"));
+            std::string glRenderer;
+            if (glGetStringFn) {
+                const char* r = reinterpret_cast<const char*>(
+                    glGetStringFn(0x1F01));  // GL_RENDERER
+                if (r) glRenderer = r;
+            }
+
+            bool isSoftwareGL =
+                glRenderer.find("llvmpipe") != std::string::npos ||
+                glRenderer.find("softpipe") != std::string::npos ||
+                glRenderer.find("swrast")   != std::string::npos ||
+                glRenderer.find("lavapipe") != std::string::npos ||
+                glRenderer.find("Software") != std::string::npos;
+
+            // Mark all existing hardware GPUs as OpenGL-capable.
+            for (auto& gpu : gpus)
+                if (!gpu.isSoftware)
+                    gpu.supportsOpenGL = true;
+
+            // Mark existing software GPUs if the GL renderer is software-based.
+            if (isSoftwareGL) {
+                for (auto& gpu : gpus)
+                    if (gpu.isSoftware)
+                        gpu.supportsOpenGL = true;
+            }
+
+            // On Linux without DXGI, gpus may be empty if no Vulkan SDK
+            // is installed.  Create a GPU entry from GL_RENDERER so the
+            // application has at least one usable device.
+            if (!glRenderer.empty()) {
+                bool alreadyListed = false;
+                for (const auto& gpu : gpus) {
+                    if (glRenderer.find(gpu.name) != std::string::npos ||
+                        gpu.name.find(glRenderer) != std::string::npos) {
+                        alreadyListed = true;
+                        break;
+                    }
+                }
+                if (!alreadyListed) {
+                    GpuInfo info;
+                    info.name = glRenderer;
+                    info.supportsOpenGL = true;
+                    info.isSoftware = isSoftwareGL;
+                    info.supportsDX11 = false;
+                    info.supportsDX12 = false;
+                    gpus.push_back(info);
+                }
+            }
+
+            glfwMakeContextCurrent(nullptr);
+            glfwDestroyWindow(probe);
+        }
+        glfwTerminate();
+    }
+#endif
+
     return gpus;
 }
 
@@ -245,11 +343,10 @@ static void PrintGpuTable(const std::vector<GpuInfo>& gpus) {
     std::cout << "\n============================================================\n"
               << "                    GPU & API Detection\n"
               << "============================================================\n";
-    std::cout << "  #   GPU";
-    // Pad to 42 chars for alignment.
-    std::cout << std::string(38, ' ') << "VRAM     Vulkan  DX12  DX11  Metal\n";
-    std::cout << "  --- ";
-    std::cout << std::string(42, '-') << " ------  ------  ----  ----  -----\n";
+    std::cout << "  GPU";
+    std::cout << std::string(41, ' ') << "VRAM     Vulkan  DX12  DX11  Metal  OpenGL\n";
+    std::cout << "  ";
+    std::cout << std::string(44, '-') << " ------  ------  ----  ----  -----  ------\n";
 
     for (std::uint32_t i = 0; i < gpus.size(); ++i) {
         const auto& g = gpus[i];
@@ -257,10 +354,10 @@ static void PrintGpuTable(const std::vector<GpuInfo>& gpus) {
         if (g.isSoftware)       label += " (Software)";
         else if (g.isDiscrete)  label += " (Discrete)";
         else                    label += " (Integrated)";
-        if (label.size() > 42) label = label.substr(0, 39) + "...";
+        if (label.size() > 44) label = label.substr(0, 41) + "...";
 
-        std::cout << "  [" << i << "] " << label;
-        if (label.size() < 42) std::cout << std::string(42 - label.size(), ' ');
+        std::cout << "  " << label;
+        if (label.size() < 44) std::cout << std::string(44 - label.size(), ' ');
 
         if (g.vramMB > 0)
             std::cout << " " << g.vramMB << " MB";
@@ -272,6 +369,7 @@ static void PrintGpuTable(const std::vector<GpuInfo>& gpus) {
                   << yn(g.supportsDX12)
                   << yn(g.supportsDX11)
                   << yn(g.supportsMetal)
+                  << yn(g.supportsOpenGL)
                   << "\n";
     }
     std::cout << "============================================================\n\n";
@@ -363,7 +461,7 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
-                      << "  --backend <vulkan|dx12|dx11|metal>  Select rendering backend (default: auto)\n"
+                      << "  --backend <vulkan|dx12|dx11|metal|opengl>  Select rendering backend (default: auto)\n"
                       << "  --gpu <index>                       Select GPU by index\n"
                       << "  --warp                               Use WARP software renderer (DX11/DX12 only)\n"
                       << "  --vsync                              Enable vertical sync (default: off)\n"
@@ -391,6 +489,9 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef HAVE_METAL
             std::cout << " metal";
+#endif
+#ifdef HAVE_OPENGL
+            std::cout << " opengl";
 #endif
             std::cout << '\n';
             return 0;
@@ -420,6 +521,9 @@ int main(int argc, char* argv[]) {
 
     struct ApiProbe { const char* id; bool (*pred)(const GpuInfo&); };
     ApiProbe probes[] = {
+#ifdef HAVE_METAL
+        {"metal",  [](const GpuInfo& g){ return g.supportsMetal; }},
+#endif
 #ifdef HAVE_VULKAN
         {"vulkan", [](const GpuInfo& g){ return g.supportsVulkan; }},
 #endif
@@ -429,8 +533,8 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_DX11
         {"dx11",   [](const GpuInfo& g){ return g.supportsDX11; }},
 #endif
-#ifdef HAVE_METAL
-        {"metal",  [](const GpuInfo& g){ return g.supportsMetal; }},
+#ifdef HAVE_OPENGL
+        {"opengl", [](const GpuInfo& g){ return g.supportsOpenGL; }},
 #endif
     };
 
@@ -472,16 +576,18 @@ int main(int argc, char* argv[]) {
     // Best API for the recommended GPU: Vulkan > DX12 > DX11 > Metal.
     const auto& recGpu = gpus[recommendedGpuIdx];
     std::string recommendedApi;
-    if (recGpu.supportsVulkan)      recommendedApi = "vulkan";
+    if (recGpu.supportsMetal)       recommendedApi = "metal";
+    else if (recGpu.supportsVulkan) recommendedApi = "vulkan";
     else if (recGpu.supportsDX12)   recommendedApi = "dx12";
     else if (recGpu.supportsDX11)   recommendedApi = "dx11";
-    else if (recGpu.supportsMetal)  recommendedApi = "metal";
+    else if (recGpu.supportsOpenGL) recommendedApi = "opengl";
 
     std::string recommendedApiLabel;
-    if (recommendedApi == "vulkan")       recommendedApiLabel = "Vulkan 1.2";
+    if (recommendedApi == "metal")        recommendedApiLabel = "Metal";
+    else if (recommendedApi == "vulkan")  recommendedApiLabel = "Vulkan 1.2";
     else if (recommendedApi == "dx12")    recommendedApiLabel = "DirectX 12";
     else if (recommendedApi == "dx11")    recommendedApiLabel = "DirectX 11";
-    else if (recommendedApi == "metal")   recommendedApiLabel = "Metal";
+    else if (recommendedApi == "opengl")  recommendedApiLabel = "OpenGL 4.3";
 
     bool hasLastRun = false;
 
@@ -507,7 +613,7 @@ int main(int argc, char* argv[]) {
             std::string mline;
             int mchoice = 0;
             if (std::getline(std::cin, mline) && !mline.empty())
-                mchoice = std::stoi(mline);
+                if (!SafeStoi(mline, mchoice)) { std::cout << "Invalid input.\n"; continue; }
 
             if (mchoice == 0) {
                 backend = recommendedApi;
@@ -526,25 +632,32 @@ int main(int argc, char* argv[]) {
                     std::cout << "No saved results.\n";
                     continue;
                 }
+                auto sorted = saved;
+                std::sort(sorted.begin(), sorted.end(),
+                    [](const gpu_bench::BenchmarkResult& a,
+                       const gpu_bench::BenchmarkResult& b) {
+                        return a.avgFps > b.avgFps;
+                    });
                 gpu_bench::PrintComparisonTable(saved);
-                if (saved.size() >= 2) {
-                    std::cout << "Enter two IDs for detailed comparison (or Enter to skip):\n"
-                              << "ID 1: " << std::flush;
+                if (sorted.size() >= 2) {
+                    std::cout << "Enter two rank numbers for detailed comparison (or Enter to skip):\n"
+                              << "#1: " << std::flush;
                     std::string s1;
                     if (std::getline(std::cin, s1) && !s1.empty()) {
-                        std::cout << "ID 2: " << std::flush;
+                        std::cout << "#2: " << std::flush;
                         std::string s2;
                         if (std::getline(std::cin, s2) && !s2.empty()) {
-                            const gpu_bench::BenchmarkResult* r1 = nullptr;
-                            const gpu_bench::BenchmarkResult* r2 = nullptr;
-                            for (const auto& r : saved) {
-                                if (r.id == s1) r1 = &r;
-                                if (r.id == s2) r2 = &r;
+                            int i1 = 0, i2 = 0;
+                            if (SafeStoi(s1, i1) && SafeStoi(s2, i2)) {
+                                --i1; --i2;
+                                if (i1 >= 0 && i1 < static_cast<int>(sorted.size()) &&
+                                    i2 >= 0 && i2 < static_cast<int>(sorted.size()))
+                                    gpu_bench::PrintDetailedComparison(sorted[i1], sorted[i2]);
+                                else
+                                    std::cout << "Invalid rank number.\n";
+                            } else {
+                                std::cout << "Invalid input.\n";
                             }
-                            if (r1 && r2)
-                                gpu_bench::PrintDetailedComparison(*r1, *r2);
-                            else
-                                std::cout << "One or both IDs not found.\n";
                         }
                     }
                 }
@@ -555,17 +668,35 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
                 gpu_bench::PrintResultsTable(saved);
-                std::cout << "Enter ID to delete (or 'all' to clear, Enter to go back): "
+                std::cout << "Enter numbers to delete (e.g. 1,3,5 or 'all', Enter to go back): #"
                           << std::flush;
                 std::string did;
                 if (std::getline(std::cin, did) && !did.empty()) {
                     if (did == "all") {
                         gpu_bench::ClearResults();
                         std::cout << "All results cleared.\n";
-                    } else if (gpu_bench::DeleteResult(did)) {
-                        std::cout << "Deleted: " << did << "\n";
                     } else {
-                        std::cout << "ID not found: " << did << "\n";
+                        std::vector<std::string> idsToDelete;
+                        std::istringstream ss(did);
+                        std::string token;
+                        while (std::getline(ss, token, ',')) {
+                            int idx = 0;
+                            if (!SafeStoi(token, idx)) {
+                                std::cout << "Invalid input: " << token << "\n";
+                                continue;
+                            }
+                            --idx;
+                            if (idx >= 0 && idx < static_cast<int>(saved.size()))
+                                idsToDelete.push_back(saved[idx].id);
+                            else
+                                std::cout << "Invalid number: " << (idx + 1) << "\n";
+                        }
+                        for (const auto& id : idsToDelete) {
+                            if (gpu_bench::DeleteResult(id))
+                                std::cout << "Deleted: " << id << "\n";
+                        }
+                        if (!idsToDelete.empty())
+                            std::cout << "Deleted " << idsToDelete.size() << " result(s).\n";
                     }
                 }
                 continue;
@@ -592,13 +723,15 @@ int main(int argc, char* argv[]) {
                 if (available[i].hwOnly) { defaultChoice = i; break; }
             }
 
+            PrintGpuTable(gpus);
             std::cout << "Available Graphics APIs:\n";
             for (std::uint32_t i = 0; i < available.size(); ++i) {
                 std::string note;
-                if (available[i].id == "vulkan")  note = "Vulkan 1.2";
-                else if (available[i].id == "dx12")  note = "DirectX 12";
-                else if (available[i].id == "dx11")  note = "DirectX 11";
-                else if (available[i].id == "metal") note = "Metal";
+                if (available[i].id == "metal")       note = "Metal";
+                else if (available[i].id == "vulkan")  note = "Vulkan 1.2";
+                else if (available[i].id == "dx12")    note = "DirectX 12";
+                else if (available[i].id == "dx11")    note = "DirectX 11";
+                else if (available[i].id == "opengl")  note = "OpenGL 4.3";
                 if (!available[i].hwOnly)
                     note += "  [Software only - runs on CPU]";
                 if (i == defaultChoice)
@@ -611,11 +744,13 @@ int main(int argc, char* argv[]) {
             std::string line;
             std::uint32_t choice = defaultChoice;
             if (std::getline(std::cin, line) && !line.empty()) {
-                choice = static_cast<std::uint32_t>(std::stoi(line));
-                if (choice >= available.size()) {
+                int tmp = 0;
+                if (!SafeStoi(line, tmp) || tmp < 0 ||
+                    static_cast<std::uint32_t>(tmp) >= available.size()) {
                     std::cerr << "Invalid index, try again.\n\n";
                     continue;
                 }
+                choice = static_cast<std::uint32_t>(tmp);
             }
             selectedBackend = available[choice].id;
             std::cout << "[Graphics API] Selected: " << selectedBackend << std::endl;
@@ -624,6 +759,32 @@ int main(int argc, char* argv[]) {
         if (warp && selectedBackend != "dx11" && selectedBackend != "dx12") {
             warp = false;
         }
+
+#ifdef __linux__
+        // On Linux, let users interactively choose a GPU for OpenGL
+        // via DRI_PRIME, since OpenGL has no built-in GPU enumeration.
+        if (selectedBackend == "opengl" && gpuIndex < 0 && gpus.size() > 1) {
+            std::cout << "\nSelect GPU for OpenGL (DRI_PRIME):\n";
+            for (std::uint32_t i = 0; i < gpus.size(); ++i) {
+                std::string label = gpus[i].name;
+                if (gpus[i].isSoftware)       label += " (Software)";
+                else if (gpus[i].isDiscrete)  label += " (Discrete)";
+                else                          label += " (Integrated)";
+                std::cout << "  [" << i << "] " << label;
+                if (i == 0) std::cout << "  <- default";
+                std::cout << "\n";
+            }
+            std::cout << "Select GPU [0-" << (gpus.size() - 1)
+                      << "] (default: 0): " << std::flush;
+            std::string gline;
+            if (std::getline(std::cin, gline) && !gline.empty()) {
+                int gi = 0;
+                if (SafeStoi(gline, gi) && gi >= 0 &&
+                    static_cast<std::uint32_t>(gi) < gpus.size())
+                    gpuIndex = static_cast<std::int32_t>(gi);
+            }
+        }
+#endif
 
         // -- Difficulty selection (only when --particles not given) --
         if (!benchCfg.particlesOverridden && !benchCfg.benchmarkMode) {
@@ -646,14 +807,45 @@ int main(int argc, char* argv[]) {
             std::string dline;
             std::uint32_t dchoice = 1;
             if (std::getline(std::cin, dline) && !dline.empty()) {
-                dchoice = static_cast<std::uint32_t>(std::stoi(dline));
-                if (dchoice > 3) dchoice = 1;
+                int tmp = 0;
+                if (SafeStoi(dline, tmp) && tmp >= 0 && tmp <= 3)
+                    dchoice = static_cast<std::uint32_t>(tmp);
             }
             benchCfg.particleCount = presets[dchoice].count;
             benchCfg.difficultyLabel = presets[dchoice].name;
         }
 
         std::int32_t effectiveGpuIndex = warp ? -2 : gpuIndex;
+
+        if (selectedBackend == "opengl" && gpus.size() > 1) {
+#ifdef __linux__
+            // On Linux, DRI_PRIME selects the GPU for Mesa OpenGL drivers.
+            // Must be set before GLFW creates the OpenGL context.
+            if (gpuIndex >= 0) {
+                std::string prime = std::to_string(gpuIndex);
+                setenv("DRI_PRIME", prime.c_str(), 1);
+                std::cout << "[OpenGL] Set DRI_PRIME=" << prime
+                          << " for GPU selection.\n" << std::endl;
+            } else {
+                std::cout << "\n[OpenGL] Tip: use DRI_PRIME=N to select a GPU, "
+                             "e.g. DRI_PRIME=1 ./gpu_benchmark --backend opengl\n"
+                          << std::endl;
+            }
+#elif defined(_WIN32)
+            // On Windows, OpenGL has no standard per-GPU selection API.
+            // NvOptimusEnablement / AmdPowerXpressRequestHighPerformance
+            // (exported above) hint the driver on Optimus/PowerXpress laptops,
+            // but have no effect on desktop multi-GPU systems.
+            if (gpuIndex < 0) {
+                std::cout << "\n[OpenGL] Note: OpenGL uses the OS-assigned GPU "
+                             "(typically the discrete GPU).\n"
+                          << "  To override, go to Windows Settings > System > "
+                             "Display > Graphics\n"
+                          << "  and assign this executable to the desired GPU.\n"
+                          << std::endl;
+            }
+#endif
+        }
 
         // -- Create and run the backend --
         try {
@@ -677,6 +869,11 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_METAL
             if (selectedBackend == "metal")
                 app = std::make_unique<gpu_bench::MetalBackend>(
+                    effectiveGpuIndex, shaderDir, benchCfg);
+#endif
+#ifdef HAVE_OPENGL
+            if (selectedBackend == "opengl")
+                app = std::make_unique<gpu_bench::OpenGLBackend>(
                     effectiveGpuIndex, shaderDir, benchCfg);
 #endif
 

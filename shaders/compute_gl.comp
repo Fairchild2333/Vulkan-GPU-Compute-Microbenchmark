@@ -1,0 +1,28 @@
+#version 430
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+    vec4 position;
+    vec4 velocity;
+};
+
+layout(binding = 0, std430) buffer ParticleBuffer {
+    Particle particles[];
+} particleBuffer;
+
+layout(binding = 1, std140) uniform ComputeParams {
+    float deltaTime;
+    float bounds;
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    particleBuffer.particles[index].position.xyz +=
+        particleBuffer.particles[index].velocity.xyz * deltaTime;
+
+    if (particleBuffer.particles[index].position.x > bounds) {
+        particleBuffer.particles[index].position.x = -bounds;
+    }
+}
