@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu_common.h"
+#include "benchmark_results.h"
 
 #include <algorithm>
 #include <fstream>
@@ -35,6 +36,7 @@ protected:
     void AccumulateTiming(double computeMs, double renderMs, double totalGpuMs);
 
     static std::vector<char> ReadFileBytes(const std::string& filename);
+    static std::string GetCpuName();
 
     std::int32_t    requestedGpuIndex_;
     std::string     shaderDir_;
@@ -48,6 +50,7 @@ private:
     void MainLoop();
     void ReportTimingIfDue(double deltaTime);
     void PrintSummary() const;
+    BenchmarkResult CollectResult() const;
     void CleanupWindow();
 
     double        lastFrameTime_      = 0.0;

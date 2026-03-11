@@ -27,6 +27,7 @@ find_package(glfw3 REQUIRED)
 set(COMMON_SOURCES
     src/main.cpp
     src/app_base.cpp
+    src/benchmark_results.cpp
 )
 
 set(BACKEND_SOURCES "")

@@ -19,7 +19,7 @@
 
 namespace gpu_bench {
 
-static std::string GetCpuName() {
+std::string AppBase::GetCpuName() {
 #ifdef _WIN32
     HKEY key = nullptr;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
@@ -73,6 +73,13 @@ void AppBase::Run() {
     glfwShowWindow(window_);
     MainLoop();
     PrintSummary();
+
+    auto result = CollectResult();
+    if (AppendResult(result)) {
+        std::cout << "[Results] Saved as " << result.id
+                  << " -> " << ResultsFilePath() << std::endl;
+    }
+
     CleanupBackend();
     CleanupWindow();
 }
@@ -331,6 +338,63 @@ void AppBase::PrintSummary() const {
 
     std::cout << "==========================================================\n"
         << std::endl;
+}
+
+BenchmarkResult AppBase::CollectResult() const {
+    BenchmarkResult r;
+    r.id          = GenerateResultId();
+    r.timestamp   = GenerateTimestamp();
+    r.graphicsApi = GetBackendName();
+    r.deviceName  = GetDeviceName();
+    r.cpuName     = GetCpuName();
+    r.memory      = config_.hostMemory ? "Host-visible" : "Device-local";
+    r.resWidth    = kWindowWidth;
+    r.resHeight   = kWindowHeight;
+    r.particleCount = config_.particleCount;
+    r.difficulty  = config_.difficultyLabel;
+    r.vsync       = config_.vsync;
+
+    const std::string devName = GetDeviceName();
+    r.isSoftware = (devName.find("Basic Render") != std::string::npos ||
+                    devName.find("WARP") != std::string::npos ||
+                    devName.find("Software") != std::string::npos);
+
+    const double duration = benchEndTime_ - benchStartTime_;
+    r.durationSec    = duration;
+    r.warmupSec      = config_.warmupTimeSec;
+    r.measuredFrames = benchMeasuredFrames_;
+    r.timingSamples  = benchSampleCount_;
+
+    if (benchSampleCount_ > 0) {
+        r.avgComputeMs  = benchSumComputeMs_  / benchSampleCount_;
+        r.minComputeMs  = benchMinComputeMs_;
+        r.maxComputeMs  = benchMaxComputeMs_;
+        r.avgRenderMs   = benchSumRenderMs_   / benchSampleCount_;
+        r.minRenderMs   = benchMinRenderMs_;
+        r.maxRenderMs   = benchMaxRenderMs_;
+        r.avgTotalGpuMs = benchSumTotalGpuMs_ / benchSampleCount_;
+        r.minTotalGpuMs = benchMinTotalGpuMs_;
+        r.maxTotalGpuMs = benchMaxTotalGpuMs_;
+    }
+
+    r.avgFps = (duration > 0.0)
+        ? static_cast<double>(benchMeasuredFrames_) / duration : 0.0;
+    r.avgFrameTimeMs = (r.avgFps > 0.0) ? 1000.0 / r.avgFps : 0.0;
+    r.gpuUtilisation = (r.avgFrameTimeMs > 0.0 && benchSampleCount_ > 0)
+        ? r.avgTotalGpuMs / r.avgFrameTimeMs : 0.0;
+
+    if (r.isSoftware)
+        r.bottleneck = "Software";
+    else if (benchSampleCount_ == 0)
+        r.bottleneck = "Unknown";
+    else if (r.gpuUtilisation < 0.5)
+        r.bottleneck = "CPU-bound";
+    else if (r.gpuUtilisation > 0.8)
+        r.bottleneck = "GPU-bound";
+    else
+        r.bottleneck = "Balanced";
+
+    return r;
 }
 
 std::vector<char> AppBase::ReadFileBytes(const std::string& filename) {
