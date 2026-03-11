@@ -98,6 +98,7 @@ void DX12Backend::CreateDevice() {
                                         IID_PPV_ARGS(&device_)),
                       "D3D12CreateDevice (WARP) failed");
         deviceName_ = "Microsoft WARP (CPU Software Renderer)";
+        driverVersion_ = "WARP";
         std::cout << "Selected GPU: " << deviceName_ << std::endl;
         return;
     }
@@ -149,7 +150,8 @@ void DX12Backend::CreateDevice() {
         auto& entry = uniqueAdapters[i];
         bool isSoftware = (entry.desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
         char name[256]{};
-        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
+        size_t converted = 0;
+        wcstombs_s(&converted, name, sizeof(name), entry.desc.Description, _TRUNCATE);
         std::cout << "  [" << i << "] " << name
                   << (isSoftware ? " (Software)" : " (Hardware)")
                   << "  VRAM: " << (entry.desc.DedicatedVideoMemory / (1024 * 1024)) << " MB"
@@ -230,14 +232,30 @@ void DX12Backend::CreateDevice() {
                 + " (HRESULT " + HrToHex(hr) + ")");
 
         char name[256]{};
-        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
+        size_t converted = 0;
+        wcstombs_s(&converted, name, sizeof(name), entry.desc.Description, _TRUNCATE);
         deviceName_ = name;
         deviceName_ += " (FL ";
         deviceName_ += kFeatureLevelNames[entry.featureLevelIdx];
         deviceName_ += ")";
+
+        // Query driver version via DXGI CheckInterfaceSupport
+        LARGE_INTEGER umdVer{};
+        ComPtr<IDXGIAdapter> baseAdapter;
+        if (SUCCEEDED(entry.adapter.As(&baseAdapter)) &&
+            SUCCEEDED(baseAdapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umdVer))) {
+            auto v = static_cast<std::uint64_t>(umdVer.QuadPart);
+            driverVersion_ = std::to_string((v >> 48) & 0xffff) + "."
+                           + std::to_string((v >> 32) & 0xffff) + "."
+                           + std::to_string((v >> 16) & 0xffff) + "."
+                           + std::to_string(v & 0xffff);
+        }
     }
 
-    std::cout << "Selected GPU: " << deviceName_ << std::endl;
+    std::cout << "Selected GPU: " << deviceName_;
+    if (!driverVersion_.empty())
+        std::cout << "  |  Driver: " << driverVersion_;
+    std::cout << std::endl;
 }
 
 void DX12Backend::CreateCommandQueue() {

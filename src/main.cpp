@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 
+#include <GLFW/glfw3.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #include <dxgi1_6.h>
@@ -94,6 +96,35 @@ struct GpuInfo {
     bool supportsOpenGL = false;
 };
 
+static bool NameLooksIntegrated(const std::string& name) {
+    // Intel integrated: HD Graphics, UHD Graphics, Iris
+    if (name.find("Intel") != std::string::npos) {
+        if (name.find("Arc") != std::string::npos)
+            return false;  // Intel Arc is discrete
+        return true;       // all other Intel GPUs are integrated
+    }
+    // NVIDIA desktop GPUs are always discrete
+    if (name.find("NVIDIA") != std::string::npos ||
+        name.find("GeForce") != std::string::npos ||
+        name.find("Quadro") != std::string::npos ||
+        name.find("Tesla") != std::string::npos)
+        return false;
+    // AMD: discrete GPUs carry a model family (HD, RX, R9, R7, R5, Pro, VII, W)
+    if (name.find("Radeon") != std::string::npos) {
+        if (name.find("HD ")  != std::string::npos ||
+            name.find("RX ")  != std::string::npos ||
+            name.find("R9 ")  != std::string::npos ||
+            name.find("R7 ")  != std::string::npos ||
+            name.find("R5 ")  != std::string::npos ||
+            name.find("VII")  != std::string::npos ||
+            name.find("Pro ") != std::string::npos ||
+            name.find(" W")   != std::string::npos)
+            return false;  // discrete
+        return true;       // generic "Radeon Graphics" = APU integrated
+    }
+    return false;  // unknown vendor, assume discrete
+}
+
 static std::vector<GpuInfo> ProbeGpus() {
     std::vector<GpuInfo> gpus;
 
@@ -122,7 +153,8 @@ static std::vector<GpuInfo> ProbeGpus() {
 
             GpuInfo info;
             char name[256]{};
-            wcstombs(name, desc.Description, sizeof(name) - 1);
+            size_t converted = 0;
+            wcstombs_s(&converted, name, sizeof(name), desc.Description, _TRUNCATE);
             info.name = name;
             info.isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
             info.vramMB = desc.DedicatedVideoMemory / (1024 * 1024);
@@ -140,28 +172,44 @@ static std::vector<GpuInfo> ProbeGpus() {
         // --- DXGI 1.6: classify discrete vs integrated ---
         // EnumAdapterByGpuPreference(HIGH_PERFORMANCE) returns the adapter
         // Windows considers "high performance" first — typically the discrete GPU.
-        Microsoft::WRL::ComPtr<IDXGIFactory6> factory6;
-        if (SUCCEEDED(factory.As(&factory6))) {
-            Microsoft::WRL::ComPtr<IDXGIAdapter1> hpAdapter;
-            for (UINT hp = 0;
-                 SUCCEEDED(factory6->EnumAdapterByGpuPreference(
-                     hp, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                     IID_PPV_ARGS(&hpAdapter)));
-                 ++hp)
-            {
-                DXGI_ADAPTER_DESC1 hpDesc{};
-                hpAdapter->GetDesc1(&hpDesc);
-                if (hpDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+        // Only use this heuristic when there are 2+ non-software GPUs; with a
+        // single GPU the preference order is meaningless and would incorrectly
+        // label an integrated GPU as discrete.
+        std::size_t hwGpuCount = 0;
+        for (const auto& g : gpus) { if (!g.isSoftware) ++hwGpuCount; }
+
+        if (hwGpuCount >= 2) {
+            Microsoft::WRL::ComPtr<IDXGIFactory6> factory6;
+            if (SUCCEEDED(factory.As(&factory6))) {
+                Microsoft::WRL::ComPtr<IDXGIAdapter1> hpAdapter;
+                for (UINT hp = 0;
+                     SUCCEEDED(factory6->EnumAdapterByGpuPreference(
+                         hp, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                         IID_PPV_ARGS(&hpAdapter)));
+                     ++hp)
+                {
+                    DXGI_ADAPTER_DESC1 hpDesc{};
+                    hpAdapter->GetDesc1(&hpDesc);
+                    if (hpDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+                        hpAdapter.Reset();
+                        continue;
+                    }
+                    char hpName[256]{};
+                    size_t hpConverted = 0;
+                    wcstombs_s(&hpConverted, hpName, sizeof(hpName), hpDesc.Description, _TRUNCATE);
+                    for (auto& g : gpus) {
+                        if (g.name == hpName) { g.isDiscrete = true; break; }
+                    }
                     hpAdapter.Reset();
-                    continue;
+                    break;  // only the first non-software high-perf adapter is discrete
                 }
-                char hpName[256]{};
-                wcstombs(hpName, hpDesc.Description, sizeof(hpName) - 1);
-                for (auto& g : gpus) {
-                    if (g.name == hpName) { g.isDiscrete = true; break; }
-                }
-                hpAdapter.Reset();
-                break;  // only the first non-software high-perf adapter is discrete
+            }
+        } else {
+            // Single hardware GPU: DXGI preference API can't distinguish, and
+            // old GPUs may lack Vulkan.  Fall back to a name-based heuristic.
+            for (auto& g : gpus) {
+                if (!g.isSoftware)
+                    g.isDiscrete = !NameLooksIntegrated(g.name);
             }
         }
     }
@@ -385,6 +433,7 @@ int main(int argc, char* argv[]) {
     std::string backend = "auto";
     std::int32_t gpuIndex = -1;
     bool useWarp = false;
+    bool runAll = false;
     gpu_bench::BenchmarkConfig benchCfg;
 
     for (int i = 1; i < argc; ++i) {
@@ -459,6 +508,8 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             return 0;
+        } else if (std::strcmp(argv[i], "--run-all") == 0) {
+            runAll = true;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "  --backend <vulkan|dx12|dx11|metal|opengl>  Select rendering backend (default: auto)\n"
@@ -474,6 +525,7 @@ int main(int argc, char* argv[]) {
                       << "  --results-delete <id>               Delete a saved result by ID\n"
                       << "  --results-clear                     Delete all saved results\n"
                       << "  --results-export <file.csv>         Export results to CSV file\n"
+                      << "  --run-all                            Benchmark every GPU x API combination, then exit\n"
                       << "  --compare                           Compare all saved results (ranked by FPS)\n"
                       << "  --compare <id1> <id2>               Detailed side-by-side comparison of two results\n"
                       << "  --help                              Show this help\n\n"
@@ -504,7 +556,7 @@ int main(int argc, char* argv[]) {
     auto gpus = ProbeGpus();
     PrintGpuTable(gpus);
 
-    bool directBenchmark = (backend != "auto") || benchCfg.benchmarkMode;
+    bool directBenchmark = (backend != "auto") || benchCfg.benchmarkMode || runAll;
 
     // ---- Build available backends ----
     struct BackendEntry { std::string id; bool hwOnly; };
@@ -591,6 +643,130 @@ int main(int argc, char* argv[]) {
 
     bool hasLastRun = false;
 
+    // ---- --run-all: benchmark every GPU × API combination, then exit ----
+    if (runAll) {
+        struct RunAllEntry {
+            std::int32_t gpuIdx;
+            std::string  backendId;
+            std::string  gpuName;
+            std::string  apiLabel;
+        };
+        std::vector<RunAllEntry> entries;
+        for (std::uint32_t gi = 0; gi < gpus.size(); ++gi) {
+            const auto& g = gpus[gi];
+            std::int32_t idx = g.isSoftware
+                ? static_cast<std::int32_t>(-2)
+                : static_cast<std::int32_t>(gi);
+#ifdef HAVE_VULKAN
+            if (g.supportsVulkan)
+                entries.push_back({idx, "vulkan", g.name, "Vulkan 1.2"});
+#endif
+#ifdef HAVE_DX12
+            if (g.supportsDX12)
+                entries.push_back({idx, "dx12", g.name, "DirectX 12"});
+#endif
+#ifdef HAVE_DX11
+            if (g.supportsDX11)
+                entries.push_back({idx, "dx11", g.name, "DirectX 11"});
+#endif
+#ifdef HAVE_METAL
+            if (g.supportsMetal)
+                entries.push_back({idx, "metal", g.name, "Metal"});
+#endif
+#ifdef HAVE_OPENGL
+            if (g.supportsOpenGL)
+                entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+#endif
+        }
+
+        if (entries.empty()) {
+            std::cerr << "No runnable GPU x API combinations found.\n";
+            return 1;
+        }
+
+        std::cout << "========== Run All: " << entries.size()
+                  << " benchmark(s) ==========\n";
+        for (std::uint32_t i = 0; i < entries.size(); ++i)
+            std::cout << "  [" << (i + 1) << "] " << entries[i].apiLabel
+                      << " / " << entries[i].gpuName << "\n";
+        std::cout << "============================================\n";
+
+        gpu_bench::BenchmarkConfig allCfg;
+        allCfg.particleCount = benchCfg.particlesOverridden
+            ? benchCfg.particleCount : 1048576;
+        allCfg.difficultyLabel = benchCfg.particlesOverridden
+            ? benchCfg.difficultyLabel : "Medium";
+        allCfg.particlesOverridden = true;
+        allCfg.vsync = false;
+        if (benchCfg.maxRunTimeSec != 15.0)
+            allCfg.maxRunTimeSec = benchCfg.maxRunTimeSec;
+        if (benchCfg.benchmarkMode) {
+            allCfg.benchmarkMode = true;
+            allCfg.benchFrames = benchCfg.benchFrames;
+        }
+
+        std::uint32_t passed = 0, failed = 0;
+        for (std::uint32_t i = 0; i < entries.size(); ++i) {
+            const auto& e = entries[i];
+            std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
+                      << "] " << e.apiLabel << " / " << e.gpuName << " <<<\n";
+            try {
+                std::unique_ptr<gpu_bench::AppBase> app;
+#ifdef HAVE_VULKAN
+                if (e.backendId == "vulkan")
+                    app = std::make_unique<gpu_bench::VulkanBackend>(
+                        e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_DX12
+                if (e.backendId == "dx12")
+                    app = std::make_unique<gpu_bench::DX12Backend>(
+                        e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_DX11
+                if (e.backendId == "dx11")
+                    app = std::make_unique<gpu_bench::DX11Backend>(
+                        e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_METAL
+                if (e.backendId == "metal")
+                    app = std::make_unique<gpu_bench::MetalBackend>(
+                        e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_OPENGL
+                if (e.backendId == "opengl")
+                    app = std::make_unique<gpu_bench::OpenGLBackend>(
+                        e.gpuIdx, shaderDir, allCfg);
+#endif
+                if (!app) {
+                    std::cout << "  SKIPPED (backend not available)\n";
+                    ++failed;
+                    continue;
+                }
+                app->Run();
+                ++passed;
+            } catch (const gpu_bench::BackToMenuException&) {
+                std::cout << "  SKIPPED (user cancelled)\n";
+                ++failed;
+            } catch (const std::exception& ex) {
+                std::cout << "  FAILED: " << ex.what() << "\n";
+                ++failed;
+            }
+        }
+
+        std::cout << "\n========== Run All Complete ==========\n"
+                  << "  Passed: " << passed << " / " << entries.size() << "\n";
+        if (failed > 0)
+            std::cout << "  Failed/Skipped: " << failed << "\n";
+        std::cout << "======================================\n";
+
+        auto allResults = gpu_bench::LoadResults();
+        if (!allResults.empty())
+            gpu_bench::PrintComparisonTable(allResults);
+
+        glfwTerminate();
+        return (failed == entries.size()) ? 1 : 0;
+    }
+
     // ---- Unified main loop ----
     while (true) {
 
@@ -606,7 +782,9 @@ int main(int argc, char* argv[]) {
             std::cout << "  [3] Compare results";
             if (!saved.empty()) std::cout << " (" << saved.size() << " saved)";
             std::cout << "\n  [4] Delete results\n"
-                      << "  [5] Exit\n"
+                      << "  [5] Run all APIs on one GPU\n"
+                      << "  [6] Run all (every GPU x API combination)\n"
+                      << "  [7] Exit\n"
                       << "====================================\n"
                       << "Select (default: 0): " << std::flush;
 
@@ -700,7 +878,165 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 continue;
-            } else if (mchoice == 5) {
+            } else if (mchoice == 5 || mchoice == 6) {
+                // --- Shared run-all logic for [5] single GPU and [6] all GPUs ---
+                struct RunAllEntry {
+                    std::int32_t gpuIdx;
+                    std::string  backendId;
+                    std::string  gpuName;
+                    std::string  apiLabel;
+                };
+
+                std::int32_t selectedGpuForAll = -1;
+
+                if (mchoice == 5) {
+                    // Let the user pick which GPU to test
+                    PrintGpuTable(gpus);
+                    std::uint32_t defaultGpu = static_cast<std::uint32_t>(recommendedGpuIdx);
+                    std::cout << "Select GPU [0-" << (gpus.size() - 1)
+                              << "] (default: " << defaultGpu << "): " << std::flush;
+                    std::string gline;
+                    std::uint32_t gchoice = defaultGpu;
+                    if (std::getline(std::cin, gline) && !gline.empty()) {
+                        int tmp = 0;
+                        if (SafeStoi(gline, tmp) && tmp >= 0 &&
+                            static_cast<std::uint32_t>(tmp) < gpus.size())
+                            gchoice = static_cast<std::uint32_t>(tmp);
+                    }
+                    selectedGpuForAll = static_cast<std::int32_t>(gchoice);
+                }
+
+                std::vector<RunAllEntry> entries;
+                for (std::uint32_t gi = 0; gi < gpus.size(); ++gi) {
+                    if (selectedGpuForAll >= 0 &&
+                        gi != static_cast<std::uint32_t>(selectedGpuForAll))
+                        continue;
+
+                    const auto& g = gpus[gi];
+                    std::int32_t idx = g.isSoftware
+                        ? static_cast<std::int32_t>(-2)
+                        : static_cast<std::int32_t>(gi);
+#ifdef HAVE_VULKAN
+                    if (g.supportsVulkan)
+                        entries.push_back({idx, "vulkan", g.name, "Vulkan 1.2"});
+#endif
+#ifdef HAVE_DX12
+                    if (g.supportsDX12)
+                        entries.push_back({idx, "dx12", g.name, "DirectX 12"});
+#endif
+#ifdef HAVE_DX11
+                    if (g.supportsDX11)
+                        entries.push_back({idx, "dx11", g.name, "DirectX 11"});
+#endif
+#ifdef HAVE_METAL
+                    if (g.supportsMetal)
+                        entries.push_back({idx, "metal", g.name, "Metal"});
+#endif
+#ifdef HAVE_OPENGL
+                    if (g.supportsOpenGL)
+                        entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+#endif
+                }
+
+                if (entries.empty()) {
+                    std::cout << "No runnable API combinations found.\n";
+                    continue;
+                }
+
+                std::cout << "\n========== Run All: " << entries.size()
+                          << " benchmark(s) ==========\n";
+                for (std::uint32_t i = 0; i < entries.size(); ++i) {
+                    std::cout << "  [" << (i + 1) << "] " << entries[i].apiLabel
+                              << " / " << entries[i].gpuName << "\n";
+                }
+                std::cout << "============================================\n"
+                          << "Proceed? (Y/n): " << std::flush;
+                std::string confirm;
+                std::getline(std::cin, confirm);
+                if (!confirm.empty() && confirm[0] != 'Y' && confirm[0] != 'y') {
+                    continue;
+                }
+
+                gpu_bench::BenchmarkConfig allCfg;
+                allCfg.particleCount = 1048576;
+                allCfg.difficultyLabel = "Medium";
+                allCfg.particlesOverridden = true;
+                allCfg.vsync = false;
+
+                std::uint32_t passed = 0, failed = 0;
+                for (std::uint32_t i = 0; i < entries.size(); ++i) {
+                    const auto& e = entries[i];
+                    std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
+                              << "] " << e.apiLabel << " / " << e.gpuName
+                              << " <<<\n";
+                    try {
+                        std::unique_ptr<gpu_bench::AppBase> app;
+#ifdef HAVE_VULKAN
+                        if (e.backendId == "vulkan")
+                            app = std::make_unique<gpu_bench::VulkanBackend>(
+                                e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_DX12
+                        if (e.backendId == "dx12")
+                            app = std::make_unique<gpu_bench::DX12Backend>(
+                                e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_DX11
+                        if (e.backendId == "dx11")
+                            app = std::make_unique<gpu_bench::DX11Backend>(
+                                e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_METAL
+                        if (e.backendId == "metal")
+                            app = std::make_unique<gpu_bench::MetalBackend>(
+                                e.gpuIdx, shaderDir, allCfg);
+#endif
+#ifdef HAVE_OPENGL
+                        if (e.backendId == "opengl")
+                            app = std::make_unique<gpu_bench::OpenGLBackend>(
+                                e.gpuIdx, shaderDir, allCfg);
+#endif
+                        if (!app) {
+                            std::cout << "  SKIPPED (backend not available)\n";
+                            ++failed;
+                            continue;
+                        }
+
+                        std::cout << "Backend: " << app->GetBackendName()
+                                  << "  |  V-Sync: OFF"
+                                  << "  |  Particles: " << allCfg.particleCount
+                                  << " (Medium)"
+                                  << "  |  Auto-stop: "
+                                  << static_cast<int>(allCfg.maxRunTimeSec)
+                                  << "s\n";
+                        app->Run();
+                        ++passed;
+
+                    } catch (const gpu_bench::BackToMenuException&) {
+                        std::cout << "  SKIPPED (user cancelled)\n";
+                        ++failed;
+                    } catch (const std::exception& ex) {
+                        std::cout << "  FAILED: " << ex.what() << "\n";
+                        ++failed;
+                    }
+                }
+
+                std::cout << "\n========== Run All Complete ==========\n"
+                          << "  Passed: " << passed << " / " << entries.size()
+                          << "\n";
+                if (failed > 0)
+                    std::cout << "  Failed/Skipped: " << failed << "\n";
+                std::cout << "======================================\n";
+
+                auto allResults = gpu_bench::LoadResults();
+                if (!allResults.empty())
+                    gpu_bench::PrintComparisonTable(allResults);
+
+                hasLastRun = (passed > 0);
+                directBenchmark = false;
+                continue;
+
+            } else if (mchoice == 7) {
                 return 0;
             } else {
                 continue;
@@ -917,5 +1253,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    glfwTerminate();
     return 0;
 }

@@ -12,7 +12,9 @@ struct BenchmarkResult {
 
     std::string graphicsApi;
     std::string deviceName;
+    std::string driverVersion;
     std::string cpuName;
+    std::string osVersion;
     std::string memory;
     std::uint32_t resWidth  = 0;
     std::uint32_t resHeight = 0;

@@ -17,8 +17,9 @@ public:
     MetalBackend(const MetalBackend&) = delete;
     MetalBackend& operator=(const MetalBackend&) = delete;
 
-    std::string GetBackendName() const override { return "Metal"; }
-    std::string GetDeviceName()  const override;
+    std::string GetBackendName()    const override { return "Metal"; }
+    std::string GetDeviceName()     const override;
+    std::string GetDriverVersion()  const override;
 
 protected:
     void InitBackend()              override;

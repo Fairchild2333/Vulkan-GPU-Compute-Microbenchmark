@@ -136,7 +136,7 @@ target_link_libraries(gpu_benchmark PRIVATE glfw ${BACKEND_LIBS})
 target_compile_definitions(gpu_benchmark PRIVATE ${BACKEND_DEFS})
 
 if(MSVC)
-    target_compile_options(gpu_benchmark PRIVATE /W4 /permissive-)
+    target_compile_options(gpu_benchmark PRIVATE /W4 /permissive- /utf-8)
 else()
     target_compile_options(gpu_benchmark PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>

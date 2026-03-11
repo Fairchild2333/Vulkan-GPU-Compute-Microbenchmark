@@ -59,6 +59,7 @@ It uses `VK_OHOS_surface` + XComponent instead of GLFW. See
 |---|---|
 | **CMake 3.20+** | https://cmake.org/download/ or system package manager |
 | **C++17 compiler** | MSVC (Visual Studio 2019+), GCC 8+, Clang, or Apple Clang |
+| **Python 3** | Required by [GLAD](https://github.com/Dav1dde/glad) (OpenGL loader generator) at build time. [python.org](https://www.python.org/downloads/) / `sudo apt install python3` / `brew install python` |
 | **GLFW** | `vcpkg install glfw3` / `brew install glfw` / `sudo apt install libglfw3-dev` |
 | **Vulkan SDK** (optional) | [LunarG](https://vulkan.lunarg.com/sdk/home) or `sudo apt install libvulkan-dev` |
 | **Windows SDK** (for DX) | Included with Visual Studio |
@@ -118,6 +119,180 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ./build/gpu_benchma
 
 ### Windows (x64 / ARM64)
 
+#### 1. Install Visual Studio C++ Build Tools
+
+Install [**Visual Studio 2026**](https://visualstudio.microsoft.com/)
+(Community edition is free) with the following workloads selected in the
+Visual Studio Installer:
+
+- **Desktop development with C++** — provides MSVC compiler (`cl`), Windows
+  SDK, CMake, and the linker.
+- **C++ CMake tools for Windows** — bundled CMake integration.
+
+If you only need command-line builds (no IDE), install
+[Build Tools for Visual Studio](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+instead — select the same workloads above.
+
+> **Note:** Visual Studio does **not** add `cmake` or `cl` to the system
+> PATH by default. They are only available inside the **Developer PowerShell
+> for VS** (or **Native Tools Command Prompt**). If you run `cmake` or `cl`
+> in a regular PowerShell window, you will get:
+>
+> ```
+> cmake : 无法将"cmake"项识别为 cmdlet、函数、脚本文件或可运行程序的名称。
+> ```
+>
+> To make them available globally, add their directories to your User PATH
+> (adjust the VS year/edition and MSVC version to match your installation):
+
+```powershell
+# cmake
+$cmakeDir = "C:\Program Files\Microsoft Visual Studio\<year>\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+
+# cl (x64 — for ARM64, replace Hostx64\x64 with Hostarm64\arm64)
+$clDir = "C:\Program Files\Microsoft Visual Studio\<year>\Community\VC\Tools\MSVC\<version>\bin\Hostx64\x64"
+
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+foreach ($dir in @($cmakeDir, $clDir)) {
+    if ($currentPath -notlike "*$dir*") {
+        $currentPath = "$currentPath;$dir"
+    }
+}
+[Environment]::SetEnvironmentVariable("Path", $currentPath, "User")
+```
+
+To find the exact MSVC version installed on your system:
+
+```powershell
+ls "C:\Program Files\Microsoft Visual Studio\<year>\Community\VC\Tools\MSVC"
+# Example output: 14.50.35717
+```
+
+Reopen your terminal, then verify:
+
+```powershell
+cmake --version   # Should be 3.20+
+cl                # Should print MSVC version information
+```
+
+#### 2. Install Standalone vcpkg
+
+> **Why not the Visual Studio bundled vcpkg?**
+> Visual Studio 2022 17.6+ ships with a bundled vcpkg, but it only supports
+> **manifest mode** (requires a `vcpkg.json` in the project). Running
+> `vcpkg install <package>` with the bundled version will fail with:
+>
+> ```
+> error: Could not locate a manifest (vcpkg.json) above the current working directory.
+> This vcpkg distribution does not have a classic mode instance.
+> ```
+>
+> To use **classic mode** (`vcpkg install glfw3`), you need a standalone
+> vcpkg installation.
+
+Clone and bootstrap the standalone vcpkg:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+```
+
+Then add `C:\vcpkg` to your User PATH so it is available globally:
+
+```powershell
+$vcpkgDir = "C:\vcpkg"
+
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($currentPath -notlike "*$vcpkgDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$vcpkgDir", "User")
+    Write-Host "vcpkg added to User PATH. Reopen your terminal for the change to take effect."
+} else {
+    Write-Host "vcpkg is already in User PATH."
+}
+```
+
+Reopen your terminal, then verify:
+
+```powershell
+vcpkg --version
+# Expected: vcpkg package management program version ...
+```
+
+#### 3. Install Vulkan SDK (optional — required for Vulkan API)
+
+Download and install the [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
+for Windows. The installer will set the `VULKAN_SDK` environment variable and
+add the SDK `Bin` directory (containing `glslc`, `vulkaninfo`, etc.) to PATH.
+
+After installation, verify that your GPU supports Vulkan:
+
+```powershell
+vulkaninfo --summary
+```
+
+Expected output (example):
+
+```
+==========
+VULKANINFO
+==========
+Vulkan Instance Version: 1.x.xxx
+
+Devices:
+========
+GPU0:
+    apiVersion         = 1.3.xxx
+    driverVersion      = xxx.xx
+    vendorID           = 0x10de
+    deviceID           = 0x2684
+    deviceType         = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+    deviceName         = NVIDIA GeForce RTX 5090
+    driverName         = NVIDIA
+    driverInfo         = xxx.xx
+```
+
+If `vulkaninfo` reports no physical devices, your GPU driver may not support
+Vulkan — the application will still work with DirectX or OpenGL backends.
+
+#### 4. Install Python 3 (required for OpenGL backend)
+
+The OpenGL backend uses [GLAD](https://github.com/Dav1dde/glad) as its
+loader generator. GLAD's CMake build invokes Python at configure time to
+generate the OpenGL function loader source code. Without Python, CMake will
+fail with:
+
+```
+Could NOT find Python (missing: Python_EXECUTABLE Interpreter)
+```
+
+Download and install Python from [python.org](https://www.python.org/downloads/).
+During installation, make sure to check **"Add python.exe to PATH"**.
+
+GLAD also depends on the **jinja2** Python package. Install it after Python
+is set up:
+
+```powershell
+pip install jinja2
+```
+
+Without `jinja2`, the build will fail with:
+
+```
+ModuleNotFoundError: No module named 'jinja2'
+```
+
+After installation, reopen your terminal and verify:
+
+```powershell
+python --version
+# Expected: Python 3.x.x
+```
+
+> **Note:** If you do not need the OpenGL backend, you can skip this step
+> and disable it with `-DENABLE_OPENGL=OFF` during CMake configuration.
+
+#### 5. Install GLFW via vcpkg
+
 ```powershell
 # x64
 vcpkg install glfw3
@@ -157,7 +332,8 @@ Vulkan SDK or `sudo apt install glslc`.
 
 Before building on Windows, ensure that `cmake`, `cl` (MSVC compiler), and
 `glslc` (Vulkan shader compiler — optional) are available in your PATH.
-Verify in PowerShell:
+If they are not found, see [Prerequisites → Windows → Step 1](#1-install-visual-studio-c-build-tools)
+for how to add them. Verify in PowerShell:
 
 ```powershell
 cmake --version   # Should be 3.20+
@@ -472,7 +648,7 @@ across a range of AMD hardware:
 | Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Prosumer / compute |
 | RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Mid-range RDNA 2 |
 | RX 6900 XT | RDNA 2 | 80 CUs | 16 GB | Flagship RDNA 2 |
-| Ryzen 7 9800X3D iGPU | RDNA 3 | 2 CUs | Shared | Integrated graphics |
+| Ryzen 7 9800X3D iGPU | RDNA 2 | 2 CUs | Shared | Integrated graphics |
 | Ryzen 7 9800X3D (WARP) | Software | — | System RAM | Microsoft WARP software rasteriser on AMD CPU |
 
 > **HD 5770 note:** Evergreen does not support Vulkan. Testing will use the

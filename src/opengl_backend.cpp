@@ -75,6 +75,7 @@ void OpenGLBackend::InitBackend() {
 
     deviceName_ = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     std::string glVerStr = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    driverVersion_ = glVerStr;
     std::cout << "[OpenGL Init] " << deviceName_ << "  |  GL " << glVerStr << std::endl;
 
     if (GLAD_VERSION_MAJOR(gladVer) < 4 ||

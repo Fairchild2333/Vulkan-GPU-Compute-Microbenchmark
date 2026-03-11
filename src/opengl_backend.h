@@ -12,8 +12,9 @@ class OpenGLBackend : public AppBase {
 public:
     using AppBase::AppBase;
 
-    std::string GetBackendName() const override { return "OpenGL"; }
-    std::string GetDeviceName()  const override { return deviceName_; }
+    std::string GetBackendName()    const override { return "OpenGL"; }
+    std::string GetDeviceName()     const override { return deviceName_; }
+    std::string GetDriverVersion()  const override { return driverVersion_; }
     bool NeedsOpenGLContext() const override { return true; }
 
 protected:
@@ -32,6 +33,7 @@ private:
     std::uint32_t LinkProgramGL(std::uint32_t s1, std::uint32_t s2);
 
     std::string deviceName_;
+    std::string driverVersion_;
 
     std::uint32_t computeProgram_ = 0;
     std::uint32_t renderProgram_  = 0;

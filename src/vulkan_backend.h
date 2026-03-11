@@ -35,8 +35,9 @@ class VulkanBackend : public AppBase {
 public:
     using AppBase::AppBase;
 
-    std::string GetBackendName() const override { return "Vulkan"; }
-    std::string GetDeviceName()  const override { return deviceName_; }
+    std::string GetBackendName()    const override { return "Vulkan"; }
+    std::string GetDeviceName()     const override { return deviceName_; }
+    std::string GetDriverVersion()  const override { return driverVersion_; }
 
 protected:
     void InitBackend()            override;
@@ -46,6 +47,7 @@ protected:
 
 private:
     std::string deviceName_;
+    std::string driverVersion_;
 
     VkInstance       instance_       = VK_NULL_HANDLE;
     VkSurfaceKHR    surface_        = VK_NULL_HANDLE;

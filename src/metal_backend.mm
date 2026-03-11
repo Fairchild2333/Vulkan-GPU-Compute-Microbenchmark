@@ -53,6 +53,14 @@ std::string MetalBackend::GetDeviceName() const {
     return impl_ ? impl_->deviceName : "";
 }
 
+std::string MetalBackend::GetDriverVersion() const {
+    NSProcessInfo* pi = [NSProcessInfo processInfo];
+    NSOperatingSystemVersion v = [pi operatingSystemVersion];
+    return "macOS " + std::to_string(v.majorVersion) + "."
+         + std::to_string(v.minorVersion) + "."
+         + std::to_string(v.patchVersion);
+}
+
 // -----------------------------------------------------------------------
 // Initialisation
 // -----------------------------------------------------------------------

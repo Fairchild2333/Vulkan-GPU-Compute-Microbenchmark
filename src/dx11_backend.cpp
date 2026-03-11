@@ -87,6 +87,7 @@ void DX11Backend::CreateDeviceAndSwapChain() {
             "D3D11CreateDevice (WARP) failed");
 
         deviceName_ = "Microsoft WARP (CPU Software Renderer)";
+        driverVersion_ = "WARP";
         std::cout << "Selected GPU: " << deviceName_ << std::endl;
 
         DXGI_SWAP_CHAIN_DESC1 sd{};
@@ -139,7 +140,8 @@ void DX11Backend::CreateDeviceAndSwapChain() {
         const auto& entry = uniqueAdapters[i];
         bool isSoftware = (entry.desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
         char name[256]{};
-        wcstombs(name, entry.desc.Description, sizeof(name) - 1);
+        size_t converted = 0;
+        wcstombs_s(&converted, name, sizeof(name), entry.desc.Description, _TRUNCATE);
         std::cout << "  [" << i << "] " << name
                   << (isSoftware ? " (Software)" : " (Hardware)")
                   << "  VRAM: " << (entry.desc.DedicatedVideoMemory / (1024 * 1024)) << " MB"
@@ -213,16 +215,27 @@ void DX11Backend::CreateDeviceAndSwapChain() {
         DXGI_ADAPTER_DESC adDesc{};
         actualAdapter->GetDesc(&adDesc);
         char name[256]{};
-        wcstombs(name, adDesc.Description, sizeof(name) - 1);
+        size_t converted = 0;
+        wcstombs_s(&converted, name, sizeof(name), adDesc.Description, _TRUNCATE);
         deviceName_ = name;
 
         bool isSoftware = (adDesc.VendorId == 0x1414 && adDesc.DeviceId == 0x8c);
         adapterType = isSoftware ? "Software (WARP/Basic Render)" : "Hardware";
+
+        LARGE_INTEGER umdVer{};
+        if (SUCCEEDED(actualAdapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umdVer))) {
+            auto v = static_cast<std::uint64_t>(umdVer.QuadPart);
+            driverVersion_ = std::to_string((v >> 48) & 0xffff) + "."
+                           + std::to_string((v >> 32) & 0xffff) + "."
+                           + std::to_string((v >> 16) & 0xffff) + "."
+                           + std::to_string(v & 0xffff);
+        }
     } else if (bestAdapter) {
         DXGI_ADAPTER_DESC1 desc{};
         bestAdapter->GetDesc1(&desc);
         char name[256]{};
-        wcstombs(name, desc.Description, sizeof(name) - 1);
+        size_t converted = 0;
+        wcstombs_s(&converted, name, sizeof(name), desc.Description, _TRUNCATE);
         deviceName_ = name;
         adapterType = "Hardware";
     } else {
@@ -241,7 +254,10 @@ void DX11Backend::CreateDeviceAndSwapChain() {
 
     std::cout << "Selected GPU: " << deviceName_ << '\n'
               << "  Driver type:   " << adapterType << '\n'
-              << "  Feature Level: " << flName(actualFeatureLevel) << std::endl;
+              << "  Feature Level: " << flName(actualFeatureLevel) << '\n';
+    if (!driverVersion_.empty())
+        std::cout << "  Driver:        " << driverVersion_ << '\n';
+    std::cout << std::flush;
 
     // Check tearing support
     ComPtr<IDXGIFactory5> factory5;

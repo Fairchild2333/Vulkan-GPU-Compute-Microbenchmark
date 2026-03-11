@@ -26,20 +26,11 @@ namespace gpu_bench {
 
 static std::string ResultsDir() {
 #ifdef _WIN32
-    char path[MAX_PATH]{};
-    if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_PROFILE, nullptr, 0, path))) {
-        std::string dir = std::string(path) + "\\.gpu_bench";
-        _mkdir(dir.c_str());
-        return dir;
-    }
-    _mkdir(".gpu_bench");
-    return ".gpu_bench";
+    _mkdir("results");
 #else
-    const char* home = std::getenv("HOME");
-    std::string dir = std::string(home ? home : ".") + "/.gpu_bench";
-    mkdir(dir.c_str(), 0755);
-    return dir;
+    mkdir("results", 0755);
 #endif
+    return "results";
 }
 
 std::string ResultsFilePath() {
@@ -148,10 +139,12 @@ static std::string ResultToJson(const BenchmarkResult& r, int indent = 4) {
 
     str("id",          r.id);
     str("timestamp",   r.timestamp);
-    str("graphicsApi", r.graphicsApi);
-    str("deviceName",  r.deviceName);
-    str("cpuName",     r.cpuName);
-    str("memory",      r.memory);
+    str("graphicsApi",    r.graphicsApi);
+    str("deviceName",     r.deviceName);
+    str("driverVersion",  r.driverVersion);
+    str("cpuName",        r.cpuName);
+    str("osVersion",      r.osVersion);
+    str("memory",         r.memory);
     u32("resWidth",    r.resWidth);
     u32("resHeight",   r.resHeight);
     u32("particleCount", r.particleCount);
@@ -227,10 +220,12 @@ static BenchmarkResult JsonToResult(const std::string& json) {
 
     r.id            = findStr("id");
     r.timestamp     = findStr("timestamp");
-    r.graphicsApi   = findStr("graphicsApi");
-    r.deviceName    = findStr("deviceName");
-    r.cpuName       = findStr("cpuName");
-    r.memory        = findStr("memory");
+    r.graphicsApi    = findStr("graphicsApi");
+    r.deviceName     = findStr("deviceName");
+    r.driverVersion  = findStr("driverVersion");
+    r.cpuName        = findStr("cpuName");
+    r.osVersion      = findStr("osVersion");
+    r.memory         = findStr("memory");
     r.resWidth      = static_cast<std::uint32_t>(findNum("resWidth"));
     r.resHeight     = static_cast<std::uint32_t>(findNum("resHeight"));
     r.particleCount = static_cast<std::uint32_t>(findNum("particleCount"));
@@ -521,7 +516,9 @@ void PrintDetailedComparison(const BenchmarkResult& a, const BenchmarkResult& b)
 
     rowStr("Graphics API:", a.graphicsApi, b.graphicsApi);
     rowStr("GPU:",          a.deviceName,  b.deviceName);
+    rowStr("Driver:",       a.driverVersion, b.driverVersion);
     rowStr("CPU:",          a.cpuName,     b.cpuName);
+    rowStr("OS:",           a.osVersion,   b.osVersion);
     rowStr("Memory:",       a.memory,      b.memory);
 
     std::string resA = std::to_string(a.resWidth) + "x" + std::to_string(a.resHeight);
@@ -561,7 +558,7 @@ bool ExportResultsCsv(const std::string& path,
     std::ofstream out(path);
     if (!out.is_open()) return false;
 
-    out << "id,timestamp,graphicsApi,deviceName,cpuName,memory,"
+    out << "id,timestamp,graphicsApi,deviceName,driverVersion,cpuName,osVersion,memory,"
            "resolution,particleCount,difficulty,vsync,isSoftware,"
            "durationSec,warmupSec,measuredFrames,timingSamples,"
            "avgComputeMs,minComputeMs,maxComputeMs,"
@@ -578,7 +575,9 @@ bool ExportResultsCsv(const std::string& path,
             << q(r.timestamp) << ","
             << q(r.graphicsApi) << ","
             << q(r.deviceName) << ","
+            << q(r.driverVersion) << ","
             << q(r.cpuName) << ","
+            << q(r.osVersion) << ","
             << q(r.memory) << ","
             << r.resWidth << "x" << r.resHeight << ","
             << r.particleCount << ","

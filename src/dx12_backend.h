@@ -15,8 +15,9 @@ class DX12Backend : public AppBase {
 public:
     using AppBase::AppBase;
 
-    std::string GetBackendName() const override { return "DX12"; }
-    std::string GetDeviceName()  const override { return deviceName_; }
+    std::string GetBackendName()    const override { return "DX12"; }
+    std::string GetDeviceName()     const override { return deviceName_; }
+    std::string GetDriverVersion()  const override { return driverVersion_; }
 
 protected:
     void InitBackend()              override;
@@ -46,6 +47,7 @@ private:
     void CollectTimestampResults();
 
     std::string deviceName_;
+    std::string driverVersion_;
 
     static constexpr UINT kFrameCount = kMaxFramesInFlight;
     static constexpr UINT kTimestampsPerFrame = 4;

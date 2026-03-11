@@ -26,6 +26,7 @@ public:
 
     virtual std::string GetBackendName() const = 0;
     virtual std::string GetDeviceName() const  = 0;
+    virtual std::string GetDriverVersion() const { return ""; }
     virtual bool NeedsOpenGLContext() const { return false; }
 
 protected:
@@ -38,6 +39,7 @@ protected:
 
     static std::vector<char> ReadFileBytes(const std::string& filename);
     static std::string GetCpuName();
+    static std::string GetOsVersion();
 
     std::int32_t    requestedGpuIndex_;
     std::string     shaderDir_;

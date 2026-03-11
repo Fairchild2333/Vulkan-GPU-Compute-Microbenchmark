@@ -178,7 +178,34 @@ void VulkanBackend::PickPhysicalDevice() {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(physicalDevice_, &props);
     deviceName_ = props.deviceName;
-    std::cout << "Selected GPU [" << chosen << "]: " << deviceName_ << std::endl;
+
+    // Decode driver version — NVIDIA uses a custom encoding, others use Vulkan standard.
+    std::uint32_t dv = props.driverVersion;
+    if (props.vendorID == 0x10de) {
+        driverVersion_ = std::to_string((dv >> 22) & 0x3ff) + "."
+                       + std::to_string((dv >> 14) & 0xff) + "."
+                       + std::to_string((dv >> 6) & 0xff) + "."
+                       + std::to_string(dv & 0x3f);
+    } else {
+        driverVersion_ = std::to_string(VK_VERSION_MAJOR(dv)) + "."
+                       + std::to_string(VK_VERSION_MINOR(dv)) + "."
+                       + std::to_string(VK_VERSION_PATCH(dv));
+    }
+
+    // Try Vulkan 1.2 driver properties for a more descriptive string.
+    VkPhysicalDeviceDriverProperties driverProps{};
+    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &driverProps;
+    vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+    if (driverProps.driverInfo[0] != '\0')
+        driverVersion_ = std::string(driverProps.driverName) + " " + driverProps.driverInfo;
+    else if (driverProps.driverName[0] != '\0')
+        driverVersion_ = std::string(driverProps.driverName) + " " + driverVersion_;
+
+    std::cout << "Selected GPU [" << chosen << "]: " << deviceName_
+              << "  |  Driver: " << driverVersion_ << std::endl;
 }
 
 void VulkanBackend::CreateLogicalDevice() {
