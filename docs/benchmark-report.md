@@ -1,5 +1,463 @@
 # Multi-Backend GPU Benchmark Report
 
+---
+
+## 1. Project Overview
+
+### What This Project Does
+
+A cross-platform GPU compute and rendering microbenchmark written in **C++17**.
+It simulates millions of particles on the GPU using a **compute shader**, then
+renders them as point-sprites using a **graphics pipeline** — all within a
+single command buffer per frame.
+
+The project implements **five interchangeable graphics API backends**:
+
+| Backend | API | Shader Language | Platforms |
+|---------|-----|----------------|-----------|
+| Vulkan 1.2 | Explicit, low-level | GLSL → SPIR-V | Windows, Linux, macOS (MoltenVK) |
+| DirectX 12 | Explicit, low-level | HLSL (SM 5.1) | Windows 10+ |
+| DirectX 11 | Implicit, driver-managed | HLSL (SM 5.0) | Windows 7+ |
+| OpenGL 4.3 | Implicit, driver-managed | GLSL 430 | Windows, Linux |
+| Metal | Explicit (Apple) | MSL | macOS |
+
+All five backends share the same `AppBase` class for windowing (GLFW), particle
+initialisation, timing, and benchmark result management. Each backend overrides
+`InitBackend()`, `DrawFrame()`, `CleanupBackend()`, and `WaitIdle()`.
+
+### Key Features
+
+- **Multi-GPU support**: enumerate and select from all available GPUs
+  (discrete → integrated → software), with `--gpu` CLI override.
+- **GPU timestamp profiling**: per-frame compute / render / total GPU timing
+  via `VkQueryPool` (Vulkan), `ID3D12QueryHeap` (DX12),
+  `ID3D11Query` (DX11), `glQueryCounter` (OpenGL).
+- **Benchmark mode**: fixed frame count or timed run, warmup period, min/max/avg
+  statistics, CPU-bound vs GPU-bound analysis.
+- **Result persistence**: auto-save to `~/.gpu_bench/results.json`, compare,
+  delete, CSV export.
+- **RenderDoc integration**: `VK_EXT_debug_utils` labels + In-Application API
+  for programmatic frame capture (`--capture <frame>`).
+- **Python tooling**: chart generation, batch benchmark automation, markdown/HTML
+  report export, 3DMark cross-validation.
+
+---
+
+## 2. Pipeline Architecture
+
+### Per-Frame Execution Model
+
+Every frame executes the following sequence in a single command buffer
+(shown for the Vulkan backend; other backends follow the same logical
+structure):
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  Command Buffer                       │
+│                                                       │
+│  ┌─ Timestamp T0 (TOP_OF_PIPE) ───────────────────┐  │
+│  │                                                 │  │
+│  │  ┌─ Particle Compute ────────────────────────┐  │  │
+│  │  │  Bind compute pipeline                    │  │  │
+│  │  │  Bind descriptor set (SSBO)               │  │  │
+│  │  │  Push constants (deltaTime, damping)      │  │  │
+│  │  │  vkCmdDispatch(N/256, 1, 1)               │  │  │
+│  │  └───────────────────────────────────────────┘  │  │
+│  │                                                 │  │
+│  ├─ Timestamp T1 (COMPUTE_SHADER) ────────────────┤  │
+│  │                                                 │  │
+│  │  ┌─ SSBO Barrier ───────────────────────────┐  │  │
+│  │  │  srcStage: COMPUTE_SHADER_BIT            │  │  │
+│  │  │  dstStage: VERTEX_INPUT_BIT              │  │  │
+│  │  │  SHADER_WRITE → VERTEX_ATTRIBUTE_READ    │  │  │
+│  │  └──────────────────────────────────────────┘  │  │
+│  │                                                 │  │
+│  ├─ Timestamp T2 (TOP_OF_PIPE) ───────────────────┤  │
+│  │                                                 │  │
+│  │  ┌─ Particle Render ────────────────────────┐  │  │
+│  │  │  Begin render pass (clear to dark blue)  │  │  │
+│  │  │  Bind graphics pipeline                  │  │  │
+│  │  │  Bind vertex buffer (same SSBO)          │  │  │
+│  │  │  vkCmdDraw(particleCount, 1, 0, 0)       │  │  │
+│  │  │  End render pass                         │  │  │
+│  │  └──────────────────────────────────────────┘  │  │
+│  │                                                 │  │
+│  └─ Timestamp T3 (COLOR_ATTACHMENT_OUTPUT) ────────┘  │
+│                                                       │
+└──────────────────────────────────────────────────────┘
+```
+
+### Compute Shader
+
+The compute shader (`shaders/compute.comp`) performs Euler integration on each
+particle:
+
+```glsl
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0, std430) buffer ParticleBuffer {
+    Particle particles[];   // vec4 position + vec4 velocity = 32 bytes
+};
+
+layout(push_constant) uniform ComputeParams {
+    float deltaTime;
+    float bounds;
+};
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    particles[i].position.xyz += particles[i].velocity.xyz * deltaTime;
+    if (particles[i].position.x > bounds)
+        particles[i].position.x = -bounds;
+}
+```
+
+- **Workgroup size**: 256 threads — balances occupancy across AMD (wavefront
+  64) and NVIDIA (warp 32) architectures.
+- **SSBO layout**: `std430` guarantees C++-compatible packing (no padding).
+- **Push constants**: avoid descriptor set updates every frame; only 8 bytes
+  pushed per dispatch.
+
+For 16M particles: `16,777,216 / 256 = 65,536` workgroups dispatched.
+
+### Graphics Pipeline
+
+The render pipeline draws all particles as `POINT_LIST` using the same SSBO
+as a vertex buffer:
+
+| Stage | Configuration |
+|-------|--------------|
+| **Vertex Input** | Binding 0, stride 32 bytes: `position` (R32G32_SFLOAT, offset 0), `colour` (R32G32B32A32_SFLOAT, offset 16) |
+| **Vertex Shader** | Maps particle speed to a blue → red colour gradient, sets `gl_PointSize = 2.0` |
+| **Rasteriser** | Point topology, no culling |
+| **Fragment Shader** | Passes interpolated colour to output |
+| **Colour Blend** | Additive blending (`SRC_ALPHA + ONE`) — overlapping particles create bright clusters |
+| **Render Pass** | Single subpass, one colour attachment (swapchain image, B8G8R8A8_SRGB) |
+
+### Memory Architecture
+
+| Mode | Vulkan Flags | When Used |
+|------|-------------|-----------|
+| **Device-local** (default) | `DEVICE_LOCAL` + staging buffer copy | Discrete GPU — particle data lives in VRAM |
+| **Host-visible** (`--host-memory`) | `HOST_VISIBLE \| HOST_COHERENT` | Integrated GPU or debugging — CPU-mappable, no staging copy |
+
+On discrete GPUs, the staging buffer is created, filled with initial particle
+data, copied via `vkCmdCopyBuffer`, then destroyed. All subsequent compute
+and render operations access only the device-local buffer.
+
+### Synchronisation
+
+The single `VkBufferMemoryBarrier` between compute and render ensures:
+
+- All compute shader writes to particle positions are visible before the
+  vertex shader reads them.
+- No additional barriers are needed because the entire frame is recorded
+  into one command buffer on one queue.
+- On integrated GPUs with unified memory, the barrier is essentially a
+  no-op (no cache flush between separate memory domains).
+
+### Timestamp Query Pipeline
+
+Each backend implements GPU timestamp queries using a **ring buffer** of
+`kTimestampSlotCount` (8) frame slots to avoid blocking on in-flight frames:
+
+| API | Write | Read | Sync | Clock Frequency |
+|-----|-------|------|------|----------------|
+| Vulkan | `vkCmdWriteTimestamp` | `vkGetQueryPoolResults` | Fence wait from previous frame | `timestampPeriod` from device properties |
+| DX12 | `ID3D12GraphicsCommandList::EndQuery` | `ResolveQueryData` + readback buffer | Fence signal/wait | `ID3D12CommandQueue::GetTimestampFrequency` |
+| DX11 | `ID3D11DeviceContext::End(query)` | `GetData` with retry loop | Disjoint query (`S_FALSE` → retry) | `D3D11_QUERY_DATA_TIMESTAMP_DISJOINT.Frequency` |
+| OpenGL | `glQueryCounter(GL_TIMESTAMP)` | `glGetQueryObjectui64v` | `GL_QUERY_RESULT_AVAILABLE` poll | Fixed 1 ns resolution |
+
+Four timestamps per frame yield three intervals: **compute time** (T1−T0),
+**render time** (T3−T2), and **total GPU time** (T3−T0).
+
+---
+
+## 3. RenderDoc Frame-Capture Analysis
+
+> Industry-standard GPU profiling of the Vulkan particle compute + render pipeline
+> using [RenderDoc](https://renderdoc.org/) — the most widely used cross-vendor,
+> cross-API GPU frame debugger.
+
+### What is RenderDoc?
+
+RenderDoc is a free, open-source (MIT licence) GPU frame debugger created by
+Baldur Karlsson. It intercepts a single frame's worth of graphics API calls,
+allowing post-mortem inspection of every resource, pipeline state, and GPU
+operation. It is one of the tools referenced by AMD's JD under *"Use of
+industry-standard profiling and debug tools"*.
+
+| Tool | Vendor | Platform |
+|------|--------|----------|
+| **RenderDoc** | Open-source | Vulkan, DX11, DX12, OpenGL — all GPUs |
+| PIX | Microsoft | DX12 (Windows only) |
+| Radeon GPU Profiler (RGP) | AMD | Vulkan, DX12 (AMD GPUs only) |
+| Nsight Graphics | NVIDIA | Vulkan, DX, OpenGL (NVIDIA GPUs only) |
+| Xcode GPU Debugger | Apple | Metal (macOS / iOS only) |
+
+### Integration in This Project
+
+The Vulkan backend integrates two layers of RenderDoc support:
+
+1. **`VK_EXT_debug_utils`** — debug labels and object names baked into the
+   command buffer, providing readable annotations inside RenderDoc's event
+   browser.
+2. **RenderDoc In-Application API** (`renderdoc_app.h`) — runtime detection of
+   RenderDoc, enabling **F12** manual capture and `--capture <frame>` CLI
+   auto-capture from within the application.
+
+### Per-Frame Command Buffer Structure
+
+A single frame records the following sequence into one `VkCommandBuffer`:
+
+| # | Event | Debug Label | Description |
+|---|-------|-------------|-------------|
+| 1 | `vkCmdResetQueryPool` | — | Reset timestamp query slots for this frame |
+| 2 | `vkCmdWriteTimestamp` (TOP_OF_PIPE) | — | T0: frame start |
+| 3 | `vkCmdBindPipeline` (COMPUTE) | **Particle Compute** (green) | Bind compute pipeline |
+| 4 | `vkCmdBindDescriptorSets` | | Bind SSBO descriptor (set 0, binding 0) |
+| 5 | `vkCmdPushConstants` | | Push `deltaTime` (float) + `damping` (float) |
+| 6 | `vkCmdDispatch(N/256, 1, 1)` | | Dispatch compute workgroups |
+| 7 | `vkCmdWriteTimestamp` (COMPUTE_SHADER) | — | T1: compute end |
+| 8 | `vkCmdPipelineBarrier` | **SSBO Barrier** (yellow) | `SHADER_WRITE → VERTEX_ATTRIBUTE_READ` |
+| 9 | `vkCmdWriteTimestamp` (TOP_OF_PIPE) | — | T2: render start |
+| 10 | `vkCmdBeginRenderPass` | **Particle Render** (blue) | Clear to (0.04, 0.08, 0.14, 1.0) |
+| 11 | `vkCmdBindPipeline` (GRAPHICS) | | Bind graphics pipeline |
+| 12 | `vkCmdBindVertexBuffers` | | Bind particle SSBO as VBO |
+| 13 | `vkCmdDraw(particleCount, 1, 0, 0)` | | Draw all particles as `POINT_LIST` |
+| 14 | `vkCmdEndRenderPass` | | Finish render pass |
+| 15 | `vkCmdWriteTimestamp` (COLOR_OUTPUT) | — | T3: render end |
+
+### Named Vulkan Objects
+
+| Object | `VK_EXT_debug_utils` Name | Purpose |
+|--------|--------------------------|---------|
+| `particleBuffer_` | `Particle SSBO` | Interleaved position + velocity + colour buffer, used as both compute SSBO and vertex VBO |
+| `computePipeline_` | `Compute Pipeline` | Particle physics update (gravity, damping, boundary reflection) |
+| `graphicsPipeline_` | `Graphics Pipeline` | Point-sprite rendering with additive blending |
+| `renderPass_` | `Main Render Pass` | Single subpass, colour-only attachment |
+
+### What to Inspect in RenderDoc
+
+**1. SSBO Data (Particle Buffer)**
+
+- Select the `vkCmdDispatch` event → Pipeline State → Compute Shader →
+  Descriptor Set 0 → Binding 0.
+- View buffer contents with custom struct format:
+  `float2 pos; float2 vel; float4 col;`
+- Compare particle positions **before** and **after** the dispatch using
+  RenderDoc's timeline — values should change by `velocity × deltaTime`.
+- Verify no NaN or out-of-bounds values.
+
+**2. Pipeline State**
+
+| Stage | Key Settings |
+|-------|-------------|
+| Compute | `local_size = (256, 1, 1)`, 1 SSBO, 2 push constants |
+| Vertex Input | Binding 0 stride = 32 bytes; attr 0 = position (`R32G32_SFLOAT`, offset 0), attr 1 = colour (`R32G32B32A32_SFLOAT`, offset 16) |
+| Rasteriser | `POINT_LIST` topology, point size = 2.0 (set in vertex shader) |
+| Blend | Additive: `srcColourBlendFactor = SRC_ALPHA`, `dstColourBlendFactor = ONE` |
+
+**3. Barrier Correctness**
+
+The single `vkCmdPipelineBarrier` between compute and render ensures:
+
+- **Source**: `VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT` / `VK_ACCESS_SHADER_WRITE_BIT`
+- **Destination**: `VK_PIPELINE_STAGE_VERTEX_INPUT_BIT` / `VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT`
+- Scope: single buffer (`Particle SSBO`), `VK_WHOLE_SIZE`.
+
+No additional implicit barriers should be inserted by the driver. If any appear
+in RenderDoc's event list, they indicate suboptimal synchronisation.
+
+**4. GPU Timing Cross-Validation**
+
+Compare RenderDoc's built-in per-event timing against the application's own
+`vkCmdWriteTimestamp` results:
+
+| Metric | App Timestamps (ms) | Notes |
+|--------|-------------------:|-------|
+| Compute dispatch | 0.025 | `vkCmdWriteTimestamp` T0 → T1 |
+| Render pass | 0.064 | `vkCmdWriteTimestamp` T2 → T3 |
+| Total GPU time | 0.090 | T0 → T3 (RTX 5090, 1M particles) |
+
+The Chrome JSON from `renderdoccmd convert` records CPU-side API call
+durations (nanosecond resolution). For GPU-side per-event timing, open the
+`.rdc` capture in RenderDoc GUI → Window → Performance Counter Viewer.
+Deviation between app timestamps and RenderDoc GPU counters should be < 5 %.
+Larger discrepancies may indicate RenderDoc interception overhead or
+single-frame vs multi-frame averaging.
+
+**5. Potential Optimisations (identified via RenderDoc)**
+
+- **Vulkan 1.3 barrier upgrade**: Replace `VERTEX_INPUT_BIT` with the more
+  precise `VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT` to reduce stall
+  scope.
+- **Indirect dispatch**: Replace hardcoded `vkCmdDispatch(N/256, 1, 1)` with
+  `vkCmdDispatchIndirect` to allow GPU-driven workload sizing.
+- **Dynamic point size**: Move the hardcoded `gl_PointSize = 2.0` to a push
+  constant for runtime adjustment without pipeline recreation.
+
+### How to Capture
+
+```powershell
+# Option A — GUI: launch from RenderDoc, press F12 during rendering
+
+# Option B — CLI (Windows)
+& "C:\Program Files\RenderDoc\renderdoccmd.exe" capture `
+    .\build\Release\gpu_benchmark.exe --backend vulkan --benchmark 200
+
+# Option C — Auto-capture frame 50 (must be launched via RenderDoc)
+.\build\Release\gpu_benchmark.exe --backend vulkan --benchmark 200 --capture 50
+```
+
+```bash
+# Linux
+renderdoccmd capture ./build/gpu_benchmark --backend vulkan --benchmark 200
+```
+
+### Automated Cross-API Capture Analysis
+
+The Full Analysis workflow (menu option 5/6) automatically captures one frame per
+API backend via the RenderDoc In-Application API, converts each `.rdc` to Chrome
+JSON using `renderdoccmd convert`, and runs `rdoc_analyse.py` to produce a
+structural comparison across all four Windows backends.
+
+**Per-Frame Event Count Comparison** (RTX 5090, 1M particles, Medium):
+
+| API | Total Events | Frame Events | Dispatches | Draw Calls | Barriers |
+|-----|------------:|-------------:|-----------:|-----------:|---------:|
+| Vulkan 1.2 | 133 | 28 | 1 | 1 | 1 |
+| DirectX 12 | 126 | 30 | 1 | 1 | **5** |
+| DirectX 11 | 162 | 26 | 1 | 1 | **0** |
+| OpenGL 4.3 | 148 | 17 | 1 | 1 | 1 |
+
+#### Key Observations
+
+1. **DX12 requires 5 resource barriers** to accomplish what Vulkan and OpenGL
+   each handle with a single barrier. This reflects DX12's finer-grained resource
+   state tracking — each buffer/texture transition (e.g. `UNORDERED_ACCESS →
+   VERTEX_AND_CONSTANT_BUFFER`, `RENDER_TARGET → PRESENT`) is an explicit
+   barrier. Vulkan batches the same transitions into one
+   `vkCmdPipelineBarrier` call with multiple memory barriers.
+
+2. **DX11 has zero explicit barriers**. The DX11 driver silently inserts all
+   necessary synchronisation on behalf of the application. This is the key
+   trade-off of implicit APIs: simpler code at the cost of opaque scheduling
+   decisions that profiling tools like RenderDoc cannot surface.
+
+3. **OpenGL's frame has the fewest events** (17 frame events) because the
+   OpenGL driver consolidates many state changes into fewer internal calls.
+   The single `glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT)` maps
+   directly to the same compute → vertex synchronisation as Vulkan's
+   `vkCmdPipelineBarrier`.
+
+4. **Vulkan debug labels are visible** in captures — 6 `vkCmdBeginDebugUtilsLabelEXT` /
+   `vkCmdEndDebugUtilsLabelEXT` calls (3 pairs: "Particle Compute", "SSBO Barrier",
+   "Particle Render") and 4 `vkCmdWriteTimestamp` calls confirm the profiling
+   instrumentation is correctly captured.
+
+5. **DX12 has the most frame events** (30) despite having fewer total events.
+   This is because explicit APIs expose more per-frame work: command allocator
+   reset, command list recording, root signature binding, and explicit resource
+   transitions that implicit APIs hide from the application.
+
+#### Synchronisation Model Comparison
+
+| | Vulkan | DX12 | DX11 | OpenGL |
+|--|--------|------|------|--------|
+| **Barrier model** | `vkCmdPipelineBarrier` — stage + access masks | `ResourceBarrier` — state transitions | Implicit (driver-managed) | `glMemoryBarrier` — bit flags |
+| **Barriers per frame** | 1 | 5 | 0 | 1 |
+| **Who manages sync?** | Application | Application | Driver | Application (coarse) |
+| **Profiler visibility** | Full | Full | Hidden | Partial |
+
+> The full per-event command sequences for all APIs are in
+> [`docs/rdoc_comparison.md`](rdoc_comparison.md), auto-generated by
+> `scripts/rdoc_analyse.py`.
+
+> See [`docs/renderdoc-analysis.md`](renderdoc-analysis.md) for the detailed
+> Vulkan analysis template and [`docs/renderdoc-capture-guide.md`](renderdoc-capture-guide.md)
+> for step-by-step capture instructions.
+
+---
+
+## 4. Cross-Validation Against 3DMark
+
+To confirm that this benchmark accurately reflects real-world GPU performance
+differences, results are cross-validated against
+[3DMark](https://www.3dmark.com/) — the industry-standard graphics benchmark
+by UL (formerly Futuremark).
+
+### Methodology
+
+1. Run this project's benchmark on each GPU (best FPS across all APIs).
+2. Run 3DMark **Time Spy** (DX12) and **Fire Strike** (DX11) on the same GPUs.
+3. Normalise all scores to a common baseline GPU (e.g. RX 580 = 1.00×).
+4. Compare the relative performance ratios.
+
+If both benchmarks rank GPUs in the same order with similar ratios, it
+validates that this project's compute-heavy workload is a meaningful GPU
+performance indicator.
+
+### Normalised Performance Comparison
+
+Baseline: **RX 580** = 1.00×
+
+| GPU | Architecture | This Benchmark | 3DMark Time Spy | 3DMark Fire Strike | Deviation (TS) |
+|-----|-------------|---------------|----------------|-------------------|----------------|
+| RX 6900 XT | RDNA 2 (80 CU) | *fill* | 4.25× | 3.52× | *fill* |
+| RX 6600 XT | RDNA 2 (32 CU) | *fill* | 2.09× | 1.87× | *fill* |
+| Vega FE | GCN 5 (64 CU) | *fill* | 1.26× | 1.37× | *fill* |
+| **RX 580** | **GCN 4 (36 CU)** | **1.00×** | **1.00×** | **1.00×** | **—** |
+| iGPU (2 CU) | RDNA 2 | *fill* | 0.13× | 0.13× | *fill* |
+| HD 5770 | TeraScale 2 | *fill* | N/A (no DX12) | 0.21× | *fill* |
+| RTX 5090 | Blackwell (170 SM) | *fill* | 8.26× | 6.30× | *fill* |
+
+> **Deviation (TS)** = how much this project's relative performance differs
+> from 3DMark Time Spy's relative ranking. Positive means our benchmark
+> favours that GPU more than 3DMark; negative means less.
+
+### Expected Deviations and Why
+
+This project runs a **single compute dispatch + single draw call** per frame.
+3DMark runs complex multi-pass rasterisation with thousands of draw calls,
+tessellation, post-processing, and full-screen effects. Expected differences:
+
+| GPU | Expected Deviation | Reason |
+|-----|-------------------|--------|
+| RX 6900 XT | Negative (−20–30%) | 80 CU + 256-bit bus benefits complex scenes more than a single dispatch |
+| iGPU (2 CU) | Near zero | Both benchmarks are GPU-limited at 2 CU regardless of workload type |
+| RTX 5090 | Negative | NVIDIA's DX12 driver path is highly optimised for 3DMark-style workloads |
+| HD 5770 | N/A for Time Spy | TeraScale 2 has no DX12 support; Fire Strike only |
+
+Deviations within **±15%** indicate strong correlation. Larger deviations are
+expected and explainable by workload characteristics.
+
+### Correlation Analysis
+
+A linear regression of project FPS vs 3DMark Time Spy scores across all GPUs
+yields an R² value of *fill after running data*. An R² > 0.90 confirms a
+strong linear relationship, validating the benchmark.
+
+> **Charts**: Run `python scripts/compare_3dmark.py --save docs/images` to
+> generate the normalised bar chart and correlation scatter plot
+> (`docs/images/3dmark_comparison.png`, `docs/images/3dmark_correlation.png`).
+
+### Data Source
+
+3DMark scores are stored in [`scripts/3dmark_scores.json`](../scripts/3dmark_scores.json).
+To auto-import from 3DMark result files:
+
+```powershell
+# Import from .3dmark-result files (3DMark Advanced/Professional)
+python scripts/compare_3dmark.py --import-3dmark "C:\Users\*\Documents\3DMark\*.3dmark-result"
+```
+
+The `.3dmark-result` format is a ZIP archive containing `arielle.xml`
+(benchmark scores, per-loop FPS) and `si.xml` (GPU name, VRAM, driver
+version). The import script parses both and merges into the JSON scores file.
+
+---
+
 **System Configuration**
 
 | Component | Specification |
@@ -14,7 +472,26 @@
 
 ---
 
-## 1. Cross-API Comparison — RTX 5090, 1M Particles (Medium)
+## 5. Python Benchmark Tooling
+
+Automated data analysis scripts in the `scripts/` directory, demonstrating
+Python scripting proficiency (JD: *"Scripting languages — Python, Perl,
+shell"*).
+
+| Script | Purpose |
+|--------|---------|
+| `plot_results.py` | Read `results.json` and generate 4 charts: FPS by GPU × API, GPU time breakdown, CPU overhead, particle-count scaling |
+| `batch_benchmark.py` | Iterate over all GPU × API × particle-count combinations, invoke the benchmark executable, and collect results automatically |
+| `export_report.py` | Export results as markdown tables or a standalone sortable HTML report with dark theme |
+| `compare_3dmark.py` | Cross-validate against 3DMark: normalised bar chart, R² correlation scatter plot, auto-import from `.3dmark-result` files |
+
+All scripts read from `~/.gpu_bench/results.json` (the application's auto-saved
+benchmark results). Charts use a dark colour scheme with API-specific colours
+(Vulkan = red, DX12 = blue, DX11 = green, OpenGL = orange, Metal = purple).
+
+---
+
+## 6. Cross-API Comparison — RTX 5090, 1M Particles (Medium)
 
 | Metric | Vulkan | DirectX 12 | DirectX 11 | OpenGL 4.3 |
 |--------|--------|------------|------------|------------|
@@ -60,7 +537,7 @@ OpenGL 4.3 remains the most portable option — it runs on Windows, Linux, and m
 
 ---
 
-## 2. Cross-GPU Comparison — Vulkan, 1M Particles (Medium), Device-local
+## 7. Cross-GPU Comparison — Vulkan, 1M Particles (Medium), Device-local
 
 | Metric | RTX 5090 (Discrete) | AMD Radeon iGPU (Integrated) |
 |--------|--------------------|-----------------------------|
@@ -74,7 +551,7 @@ The RTX 5090 (21,760 CUDA cores, ~3,000 GB/s bandwidth) outperforms the Zen 4 iG
 
 ---
 
-## 3. Memory Allocation Impact — Vulkan, RTX 5090
+## 8. Memory Allocation Impact — Vulkan, RTX 5090
 
 | Memory Mode | Compute | Render | Total GPU | FPS |
 |-------------|---------|--------|-----------|-----|
@@ -87,7 +564,7 @@ On an integrated GPU, this penalty disappears because host-visible and device-lo
 
 ---
 
-## 4. Software Renderer Baseline — WARP, 1M Particles
+## 9. Software Renderer Baseline — WARP, 1M Particles
 
 **WARP** (Windows Advanced Rasterisation Platform) is Microsoft's CPU-based software rasteriser bundled with every modern Windows installation. It runs the entire graphics pipeline on the CPU using SIMD (SSE/AVX) and multi-threading, serving as both a correctness reference and a fallback when no hardware GPU driver is available.
 
@@ -135,7 +612,7 @@ On systems with a hardware Vulkan ICD (e.g. NVIDIA, AMD), the Dozen/WARP device 
 
 ---
 
-## 5. OpenGL GPU Selection — Platform Limitations
+## 10. OpenGL GPU Selection — Platform Limitations
 
 Unlike Vulkan, DirectX 11, and DirectX 12, **OpenGL has no standard API for enumerating or selecting a specific GPU** on a multi-GPU system. Each of the other backends provides an adapter/device enumeration mechanism:
 
@@ -180,7 +657,7 @@ This limitation means OpenGL cross-GPU comparisons on Windows require manual con
 
 ---
 
-## 6. DX11 Timestamp Query Failures — Three Distinct Causes
+## 11. DX11 Timestamp Query Failures — Three Distinct Causes
 
 DX11 is the only API in the benchmark where GPU timestamp queries can silently fail to produce results. Vulkan and DX12 always return timestamp values regardless of GPU clock state. DX11, by contrast, uses a `D3D11_QUERY_TIMESTAMP_DISJOINT` wrapper that can actively refuse to return data.
 
@@ -249,7 +726,7 @@ DX11 is the only API that can actively **withhold** timestamp data based on GPU 
 
 ---
 
-## 7. Legacy Discrete GPU vs Modern iGPU — Compute Efficiency Beyond TFLOPS
+## 12. Legacy Discrete GPU vs Modern iGPU — Compute Efficiency Beyond TFLOPS
 
 ### Test System B
 
@@ -289,7 +766,7 @@ The RDNA 2 integrated GPU outperforms the HD 5770 discrete GPU in **every** comp
 
 ### 7c. Theoretical TFLOPS Comparison
 
-| | HD 5770 | Ryzen 7600 iGPU |
+| | HD 5770 | Ryzen 5 7600 iGPU |
 |--|---------|----------------|
 | Architecture | TeraScale 2 (2009) | RDNA 2 (2022) |
 | Stream Processors | 800 (160 × VLIW5) | 128 (2 CU × 64) |
@@ -313,7 +790,7 @@ RDNA 2, by contrast, uses a scalar + SIMD32 design where each compute unit conta
 
 **Compute shader support maturity.** The HD 5770 was designed primarily for DirectX 11-era pixel and vertex shading. Its compute shader support (DirectCompute 5.0) was a first-generation implementation with limited occupancy, no asynchronous compute queues, and restricted shared memory bandwidth. RDNA 2 treats compute as a first-class workload with dedicated hardware schedulers, LDS (Local Data Share) bandwidth matched to ALU throughput, and fine-grained wave management.
 
-**Driver optimisation.** AMD's current Radeon Software drivers for RDNA 2 are actively maintained and optimised. The HD 5770's legacy Crimson drivers (version 16.2.1, Mar 2016) have not received performance updates in over a decade (real 10 years, now it's Mar 2026). Compute shader code generation for TeraScale 2 was never a priority — these drivers were written when GPU compute was still in its infancy.
+**Driver optimisation.** AMD's current Radeon Software **Adrenalin** Edition drivers for RDNA 2 are actively maintained and optimised. The HD 5770's legacy **Crimson** Edition drivers (version 16.2.1, Mar 2016) have not received performance updates in over a decade (actually, it‘s real 10 years, now it's Mar 2026). Compute shader code generation for TeraScale 2 was never a priority — these drivers were written when GPU compute was still in its infancy.
 
 **Memory bandwidth parity.** The HD 5770's theoretical advantage in dedicated GDDR5 is largely neutralised here. Its 76.8 GB/s bandwidth is slightly below the iGPU's ~83 GB/s from dual-channel DDR5-6000 C28. For a bandwidth-sensitive particle simulation, this effectively levels the playing field — or tilts it slightly in the iGPU's favour.
 
@@ -329,7 +806,7 @@ This makes the benchmark a useful complement to traditional GPU tests. A gaming 
 
 ---
 
-## Summary
+## 13. Summary
 
 | Observation | Explanation |
 |-------------|-------------|
@@ -350,3 +827,7 @@ This makes the benchmark a useful complement to traditional GPU tests. A gaming 
 | HD 5770 would likely win a gaming benchmark | Traditional rasterisation relies on fixed-function units (TMUs, ROPs) where the HD 5770 has 4–6× more hardware than the iGPU |
 
 These results demonstrate that **API overhead, memory placement, and hardware architecture** all significantly affect GPU compute performance — and that the optimal configuration depends on workload complexity and hardware topology.
+
+---
+
+*This report was produced with the assistance of [Cursor](https://www.cursor.com/) IDE and **Claude Opus 4.6** (Anthropic).*

@@ -29,6 +29,11 @@ void VulkanBackend::InitBackend() {
     CreateCommandBuffers();
     CreateSyncObjects();
     CreateTimestampQueryPool();
+
+    SetObjectName(VK_OBJECT_TYPE_BUFFER,   reinterpret_cast<std::uint64_t>(particleBuffer_),   "Particle SSBO");
+    SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(computePipeline_),  "Compute Pipeline");
+    SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(graphicsPipeline_), "Graphics Pipeline");
+    SetObjectName(VK_OBJECT_TYPE_RENDER_PASS, reinterpret_cast<std::uint64_t>(renderPass_),    "Main Render Pass");
 }
 
 void VulkanBackend::WaitIdle() {
@@ -52,6 +57,7 @@ void VulkanBackend::CreateInstance() {
     std::uint32_t glfwExtCount = 0;
     const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
     std::vector<const char*> extensions(glfwExts, glfwExts + glfwExtCount);
+    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     VkInstanceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -61,7 +67,50 @@ void VulkanBackend::CreateInstance() {
 
     if (vkCreateInstance(&ci, nullptr, &instance_) != VK_SUCCESS)
         throw std::runtime_error("vkCreateInstance failed");
+
+    LoadDebugUtilsFunctions();
 }
+
+// -----------------------------------------------------------------------
+// Debug Utils (RenderDoc labels & object names)
+// -----------------------------------------------------------------------
+
+void VulkanBackend::LoadDebugUtilsFunctions() {
+    vkCmdBeginDebugUtilsLabel_ = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+        vkGetInstanceProcAddr(instance_, "vkCmdBeginDebugUtilsLabelEXT"));
+    vkCmdEndDebugUtilsLabel_ = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+        vkGetInstanceProcAddr(instance_, "vkCmdEndDebugUtilsLabelEXT"));
+    vkSetDebugUtilsObjectName_ = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+        vkGetInstanceProcAddr(instance_, "vkSetDebugUtilsObjectNameEXT"));
+    debugUtilsAvailable_ = vkCmdBeginDebugUtilsLabel_ && vkCmdEndDebugUtilsLabel_;
+}
+
+void VulkanBackend::SetObjectName(VkObjectType type, std::uint64_t handle, const char* name) const {
+    if (!vkSetDebugUtilsObjectName_ || device_ == VK_NULL_HANDLE) return;
+    VkDebugUtilsObjectNameInfoEXT ni{};
+    ni.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    ni.objectType   = type;
+    ni.objectHandle = handle;
+    ni.pObjectName  = name;
+    vkSetDebugUtilsObjectName_(device_, &ni);
+}
+
+void VulkanBackend::BeginDebugLabel(VkCommandBuffer cmd, const char* name,
+                                     float r, float g, float b) const {
+    if (!debugUtilsAvailable_) return;
+    VkDebugUtilsLabelEXT label{};
+    label.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.pLabelName = name;
+    label.color[0] = r; label.color[1] = g; label.color[2] = b; label.color[3] = 1.0f;
+    vkCmdBeginDebugUtilsLabel_(cmd, &label);
+}
+
+void VulkanBackend::EndDebugLabel(VkCommandBuffer cmd) const {
+    if (!debugUtilsAvailable_) return;
+    vkCmdEndDebugUtilsLabel_(cmd);
+}
+
+// -----------------------------------------------------------------------
 
 void VulkanBackend::CreateSurface() {
     if (glfwCreateWindowSurface(instance_, window_, nullptr, &surface_) != VK_SUCCESS)
@@ -790,6 +839,8 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     if (timestampsSupported_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, tsBase);
 
+    // --- Compute pass ---
+    BeginDebugLabel(cmd, "Particle Compute", 0.2f, 0.8f, 0.2f);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, nullptr);
@@ -797,10 +848,13 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     vkCmdPushConstants(cmd, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(ComputeParams), &params);
     vkCmdDispatch(cmd, config_.particleCount / kComputeWorkGroupSize, 1, 1);
+    EndDebugLabel(cmd);
 
     if (timestampsSupported_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, tsBase + 1);
 
+    // --- SSBO barrier: compute write → vertex read ---
+    BeginDebugLabel(cmd, "SSBO Barrier (Compute -> Vertex)", 0.9f, 0.9f, 0.2f);
     VkBufferMemoryBarrier barrier{};
     barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     barrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
@@ -812,10 +866,13 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         0, 0, nullptr, 1, &barrier, 0, nullptr);
+    EndDebugLabel(cmd);
 
     if (timestampsSupported_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, tsBase + 2);
 
+    // --- Render pass ---
+    BeginDebugLabel(cmd, "Particle Render", 0.2f, 0.4f, 0.9f);
     VkClearValue clear = {{{0.04f, 0.08f, 0.14f, 1.0f}}};
     VkRenderPassBeginInfo rp{};
     rp.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -832,6 +889,7 @@ void VulkanBackend::RecordCommandBuffer(std::uint32_t imageIndex, float deltaTim
     vkCmdBindVertexBuffers(cmd, 0, 1, bufs, offs);
     vkCmdDraw(cmd, config_.particleCount, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
+    EndDebugLabel(cmd);
 
     if (timestampsSupported_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, timestampQueryPool_, tsBase + 3);

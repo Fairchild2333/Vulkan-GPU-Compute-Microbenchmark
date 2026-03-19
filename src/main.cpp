@@ -12,6 +12,7 @@
 #endif
 #ifdef HAVE_METAL
 #include "metal_backend.h"
+#include "metal_probe.h"
 #endif
 #ifdef HAVE_OPENGL
 #include "opengl_backend.h"
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -216,12 +218,28 @@ static std::vector<GpuInfo> ProbeGpus() {
 
 #endif  // _WIN32
 
-#ifdef __APPLE__
+#ifdef HAVE_METAL
     {
-        GpuInfo info;
-        info.name = "Apple GPU (Metal)";
-        info.supportsMetal = true;
-        gpus.push_back(info);
+        auto metalDevices = gpu_bench::ProbeMetalDevices();
+        for (auto& md : metalDevices) {
+            auto it = std::find_if(gpus.begin(), gpus.end(), [&](const GpuInfo& g) {
+                return g.name.find(md.name) != std::string::npos
+                    || md.name.find(g.name) != std::string::npos;
+            });
+            if (it != gpus.end()) {
+                it->supportsMetal = true;
+                if (it->vramMB == 0 && md.vramBytes > 0)
+                    it->vramMB = static_cast<std::uint32_t>(md.vramBytes / (1024 * 1024));
+            } else {
+                GpuInfo info;
+                info.name          = md.name;
+                info.supportsMetal = true;
+                info.vramMB        = static_cast<std::uint32_t>(md.vramBytes / (1024 * 1024));
+                info.isDiscrete    = !md.isLowPower;
+                info.isSoftware    = false;
+                gpus.push_back(info);
+            }
+        }
     }
 #endif
 
@@ -434,6 +452,7 @@ int main(int argc, char* argv[]) {
     std::int32_t gpuIndex = -1;
     bool useWarp = false;
     bool runAll = false;
+    bool fullAnalysis = false;
     gpu_bench::BenchmarkConfig benchCfg;
 
     for (int i = 1; i < argc; ++i) {
@@ -508,8 +527,16 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             return 0;
+        } else if (std::strcmp(argv[i], "--capture") == 0) {
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                benchCfg.captureAtSec = std::stod(argv[++i]);
+            } else {
+                benchCfg.captureAtSec = 5.0;
+            }
         } else if (std::strcmp(argv[i], "--run-all") == 0) {
             runAll = true;
+        } else if (std::strcmp(argv[i], "--full-analysis") == 0) {
+            fullAnalysis = true;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "  --backend <vulkan|dx12|dx11|metal|opengl>  Select rendering backend (default: auto)\n"
@@ -526,6 +553,8 @@ int main(int argc, char* argv[]) {
                       << "  --results-clear                     Delete all saved results\n"
                       << "  --results-export <file.csv>         Export results to CSV file\n"
                       << "  --run-all                            Benchmark every GPU x API combination, then exit\n"
+                      << "  --capture [seconds]                 Auto-capture via RenderDoc at T seconds (default: 5)\n"
+                      << "  --full-analysis                     Run all APIs + RenderDoc capture + Python charts (interactive)\n"
                       << "  --compare                           Compare all saved results (ranked by FPS)\n"
                       << "  --compare <id1> <id2>               Detailed side-by-side comparison of two results\n"
                       << "  --help                              Show this help\n\n"
@@ -782,16 +811,21 @@ int main(int argc, char* argv[]) {
             std::cout << "  [3] Compare results";
             if (!saved.empty()) std::cout << " (" << saved.size() << " saved)";
             std::cout << "\n  [4] Delete results\n"
-                      << "  [5] Run all APIs on one GPU\n"
-                      << "  [6] Run all (every GPU x API combination)\n"
+                      << "  [5] Full analysis - one GPU (all APIs + RenderDoc + charts)\n"
+                      << "  [6] Full analysis - all GPUs x APIs (+ RenderDoc + charts)\n"
                       << "  [7] Exit\n"
                       << "====================================\n"
                       << "Select (default: 0): " << std::flush;
 
             std::string mline;
             int mchoice = 0;
-            if (std::getline(std::cin, mline) && !mline.empty())
+            if (fullAnalysis) {
+                mchoice = 5;
+                fullAnalysis = false;
+                std::cout << "5  (--full-analysis)\n";
+            } else if (std::getline(std::cin, mline) && !mline.empty()) {
                 if (!SafeStoi(mline, mchoice)) { std::cout << "Invalid input.\n"; continue; }
+            }
 
             if (mchoice == 0) {
                 backend = recommendedApi;
@@ -841,45 +875,93 @@ int main(int argc, char* argv[]) {
                 }
                 continue;
             } else if (mchoice == 4) {
-                if (saved.empty()) {
-                    std::cout << "No saved results.\n";
-                    continue;
-                }
-                gpu_bench::PrintResultsTable(saved);
-                std::cout << "Enter numbers to delete (e.g. 1,3,5 or 'all', Enter to go back): #"
-                          << std::flush;
-                std::string did;
-                if (std::getline(std::cin, did) && !did.empty()) {
-                    if (did == "all") {
-                        gpu_bench::ClearResults();
-                        std::cout << "All results cleared.\n";
-                    } else {
-                        std::vector<std::string> idsToDelete;
-                        std::istringstream ss(did);
-                        std::string token;
-                        while (std::getline(ss, token, ',')) {
-                            int idx = 0;
-                            if (!SafeStoi(token, idx)) {
-                                std::cout << "Invalid input: " << token << "\n";
-                                continue;
-                            }
-                            --idx;
-                            if (idx >= 0 && idx < static_cast<int>(saved.size()))
-                                idsToDelete.push_back(saved[idx].id);
-                            else
-                                std::cout << "Invalid number: " << (idx + 1) << "\n";
-                        }
-                        for (const auto& id : idsToDelete) {
-                            if (gpu_bench::DeleteResult(id))
-                                std::cout << "Deleted: " << id << "\n";
-                        }
-                        if (!idsToDelete.empty())
-                            std::cout << "Deleted " << idsToDelete.size() << " result(s).\n";
+                std::cout << "\n========== Delete Data ==========\n"
+                          << "  [1] Delete benchmark results";
+                if (!saved.empty()) std::cout << " (" << saved.size() << " saved)";
+                std::cout << "\n  [2] Delete Python charts & reports\n"
+                          << "  [3] Delete all (results + charts + reports)\n"
+                          << "  [0] Back\n"
+                          << "=================================\n"
+                          << "Select: " << std::flush;
+
+                std::string dline;
+                int dchoice = 0;
+                if (std::getline(std::cin, dline) && !dline.empty())
+                    SafeStoi(dline, dchoice);
+
+                auto deletePythonOutputs = [&]() {
+#ifdef _WIN32
+                    std::string sep = "\\";
+#else
+                    std::string sep = "/";
+#endif
+                    std::string projectRoot = shaderDir + ".." + sep + "..";
+                    std::string docsDir = projectRoot + sep + "docs" + sep;
+                    std::string imagesDir = docsDir + "images" + sep;
+                    const char* files[] = {
+                        "fps_by_gpu.png", "gpu_time_breakdown.png",
+                        "cpu_overhead.png", "scaling.png"
+                    };
+                    int count = 0;
+                    for (const char* f : files) {
+                        std::string path = imagesDir + f;
+                        if (std::remove(path.c_str()) == 0) ++count;
                     }
+                    std::string mdPath = docsDir + "results-table.md";
+                    std::string htmlPath = docsDir + "report.html";
+                    if (std::remove(mdPath.c_str()) == 0) ++count;
+                    if (std::remove(htmlPath.c_str()) == 0) ++count;
+                    std::cout << "Deleted " << count << " Python output file(s).\n";
+                };
+
+                if (dchoice == 1) {
+                    if (saved.empty()) {
+                        std::cout << "No saved results.\n";
+                    } else {
+                        gpu_bench::PrintResultsTable(saved);
+                        std::cout << "Enter numbers to delete (e.g. 1,3,5 or 'all', Enter to go back): #"
+                                  << std::flush;
+                        std::string did;
+                        if (std::getline(std::cin, did) && !did.empty()) {
+                            if (did == "all") {
+                                gpu_bench::ClearResults();
+                                std::cout << "All results cleared.\n";
+                            } else {
+                                std::vector<std::string> idsToDelete;
+                                std::istringstream ss(did);
+                                std::string token;
+                                while (std::getline(ss, token, ',')) {
+                                    int idx = 0;
+                                    if (!SafeStoi(token, idx)) {
+                                        std::cout << "Invalid input: " << token << "\n";
+                                        continue;
+                                    }
+                                    --idx;
+                                    if (idx >= 0 && idx < static_cast<int>(saved.size()))
+                                        idsToDelete.push_back(saved[idx].id);
+                                    else
+                                        std::cout << "Invalid number: " << (idx + 1) << "\n";
+                                }
+                                for (const auto& id : idsToDelete) {
+                                    if (gpu_bench::DeleteResult(id))
+                                        std::cout << "Deleted: " << id << "\n";
+                                }
+                                if (!idsToDelete.empty())
+                                    std::cout << "Deleted " << idsToDelete.size() << " result(s).\n";
+                            }
+                        }
+                    }
+                } else if (dchoice == 2) {
+                    deletePythonOutputs();
+                } else if (dchoice == 3) {
+                    gpu_bench::ClearResults();
+                    std::cout << "All benchmark results cleared.\n";
+                    deletePythonOutputs();
                 }
                 continue;
             } else if (mchoice == 5 || mchoice == 6) {
-                // --- Shared run-all logic for [5] single GPU and [6] all GPUs ---
+                // ---- Full Analysis: benchmark + RenderDoc capture + Python charts ----
+                // [5] = one GPU (user selects, default best), [6] = every GPU
                 struct RunAllEntry {
                     std::int32_t gpuIdx;
                     std::string  backendId;
@@ -890,7 +972,6 @@ int main(int argc, char* argv[]) {
                 std::int32_t selectedGpuForAll = -1;
 
                 if (mchoice == 5) {
-                    // Let the user pick which GPU to test
                     PrintGpuTable(gpus);
                     std::uint32_t defaultGpu = static_cast<std::uint32_t>(recommendedGpuIdx);
                     std::cout << "Select GPU [0-" << (gpus.size() - 1)
@@ -916,6 +997,10 @@ int main(int argc, char* argv[]) {
                     std::int32_t idx = g.isSoftware
                         ? static_cast<std::int32_t>(-2)
                         : static_cast<std::int32_t>(gi);
+#ifdef HAVE_METAL
+                    if (g.supportsMetal)
+                        entries.push_back({idx, "metal", g.name, "Metal"});
+#endif
 #ifdef HAVE_VULKAN
                     if (g.supportsVulkan)
                         entries.push_back({idx, "vulkan", g.name, "Vulkan 1.2"});
@@ -928,13 +1013,15 @@ int main(int argc, char* argv[]) {
                     if (g.supportsDX11)
                         entries.push_back({idx, "dx11", g.name, "DirectX 11"});
 #endif
-#ifdef HAVE_METAL
-                    if (g.supportsMetal)
-                        entries.push_back({idx, "metal", g.name, "Metal"});
-#endif
 #ifdef HAVE_OPENGL
-                    if (g.supportsOpenGL)
+                    if (g.supportsOpenGL) {
+#ifdef _WIN32
+                        if (gi == 0)
+                            entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+#else
                         entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+#endif
+                    }
 #endif
                 }
 
@@ -943,75 +1030,83 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                std::cout << "\n========== Run All: " << entries.size()
-                          << " benchmark(s) ==========\n";
+                std::string scope = (mchoice == 5) ? "One GPU" : "All GPUs";
+                std::cout << "\n====== Full Analysis (" << scope << "): "
+                          << entries.size() << " benchmark(s) ======\n";
                 for (std::uint32_t i = 0; i < entries.size(); ++i) {
                     std::cout << "  [" << (i + 1) << "] " << entries[i].apiLabel
-                              << " / " << entries[i].gpuName << "\n";
+                              << " / " << entries[i].gpuName;
+#ifdef _WIN32
+                    if (entries[i].backendId == "opengl")
+                        std::cout << "  (Win: always uses system default GPU)";
+#endif
+                    std::cout << "\n";
                 }
-                std::cout << "============================================\n"
+                std::cout << "  + RenderDoc capture at 5s mark (if RenderDoc detected)\n"
+                          << "  + Python chart generation after all runs\n"
+                          << "=======================================================\n"
                           << "Proceed? (Y/n): " << std::flush;
                 std::string confirm;
                 std::getline(std::cin, confirm);
-                if (!confirm.empty() && confirm[0] != 'Y' && confirm[0] != 'y') {
+                if (!confirm.empty() && confirm[0] != 'Y' && confirm[0] != 'y')
                     continue;
-                }
 
-                gpu_bench::BenchmarkConfig allCfg;
-                allCfg.particleCount = 1048576;
-                allCfg.difficultyLabel = "Medium";
-                allCfg.particlesOverridden = true;
-                allCfg.vsync = false;
+                gpu_bench::BenchmarkConfig faCfg;
+                faCfg.particleCount = 1048576;
+                faCfg.difficultyLabel = "Medium";
+                faCfg.particlesOverridden = true;
+                faCfg.vsync = false;
+                faCfg.captureAtSec = 5.0;
 
                 std::uint32_t passed = 0, failed = 0;
+                std::vector<std::string> rdcFiles;
+
                 for (std::uint32_t i = 0; i < entries.size(); ++i) {
                     const auto& e = entries[i];
                     std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
                               << "] " << e.apiLabel << " / " << e.gpuName
-                              << " <<<\n";
+                              << " (15s + RenderDoc @ 5s) <<<\n";
                     try {
                         std::unique_ptr<gpu_bench::AppBase> app;
 #ifdef HAVE_VULKAN
                         if (e.backendId == "vulkan")
                             app = std::make_unique<gpu_bench::VulkanBackend>(
-                                e.gpuIdx, shaderDir, allCfg);
+                                e.gpuIdx, shaderDir, faCfg);
 #endif
 #ifdef HAVE_DX12
                         if (e.backendId == "dx12")
                             app = std::make_unique<gpu_bench::DX12Backend>(
-                                e.gpuIdx, shaderDir, allCfg);
+                                e.gpuIdx, shaderDir, faCfg);
 #endif
 #ifdef HAVE_DX11
                         if (e.backendId == "dx11")
                             app = std::make_unique<gpu_bench::DX11Backend>(
-                                e.gpuIdx, shaderDir, allCfg);
+                                e.gpuIdx, shaderDir, faCfg);
 #endif
 #ifdef HAVE_METAL
                         if (e.backendId == "metal")
                             app = std::make_unique<gpu_bench::MetalBackend>(
-                                e.gpuIdx, shaderDir, allCfg);
+                                e.gpuIdx, shaderDir, faCfg);
 #endif
 #ifdef HAVE_OPENGL
-                        if (e.backendId == "opengl")
+                        if (e.backendId == "opengl") {
+#ifdef _WIN32
+                            std::cout << "  NOTE: OpenGL on Windows cannot select GPU "
+                                         "- using system default.\n";
+#endif
                             app = std::make_unique<gpu_bench::OpenGLBackend>(
-                                e.gpuIdx, shaderDir, allCfg);
+                                e.gpuIdx, shaderDir, faCfg);
+                        }
 #endif
                         if (!app) {
                             std::cout << "  SKIPPED (backend not available)\n";
                             ++failed;
                             continue;
                         }
-
-                        std::cout << "Backend: " << app->GetBackendName()
-                                  << "  |  V-Sync: OFF"
-                                  << "  |  Particles: " << allCfg.particleCount
-                                  << " (Medium)"
-                                  << "  |  Auto-stop: "
-                                  << static_cast<int>(allCfg.maxRunTimeSec)
-                                  << "s\n";
                         app->Run();
+                        if (!app->GetLastCapturePath().empty())
+                            rdcFiles.push_back(app->GetLastCapturePath());
                         ++passed;
-
                     } catch (const gpu_bench::BackToMenuException&) {
                         std::cout << "  SKIPPED (user cancelled)\n";
                         ++failed;
@@ -1021,16 +1116,132 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                std::cout << "\n========== Run All Complete ==========\n"
-                          << "  Passed: " << passed << " / " << entries.size()
-                          << "\n";
+                std::cout << "\n========== Benchmark Phase Complete ==========\n"
+                          << "  Passed: " << passed << " / " << entries.size() << "\n";
                 if (failed > 0)
                     std::cout << "  Failed/Skipped: " << failed << "\n";
-                std::cout << "======================================\n";
 
                 auto allResults = gpu_bench::LoadResults();
                 if (!allResults.empty())
                     gpu_bench::PrintComparisonTable(allResults);
+
+                // shaderDir = exe directory (e.g. build/Release/)
+                // project root is two levels up: build/Release/../../
+#ifdef _WIN32
+                std::string sep = "\\";
+#else
+                std::string sep = "/";
+#endif
+                std::string projectRoot = shaderDir + ".." + sep + "..";
+                std::string scriptsDir = projectRoot + sep + "scripts" + sep;
+                std::string docsDir = projectRoot + sep + "docs" + sep;
+                std::string rdocCapDir = projectRoot + sep + "rdoc_captures" + sep;
+
+                // Helper: run a command inside the project root to avoid
+                // space-in-path issues with cmd.exe quoting.
+                auto runInProjectRoot = [&](const std::string& innerCmd) -> int {
+#ifdef _WIN32
+                    std::string full = "\"cd /d \"" + projectRoot
+                        + "\" && " + innerCmd + "\"";
+#else
+                    std::string full = "cd \"" + projectRoot
+                        + "\" && " + innerCmd;
+#endif
+                    return std::system(full.c_str());
+                };
+
+                // ---- RenderDoc capture -> Chrome JSON conversion ----
+                if (!rdcFiles.empty()) {
+                    std::cout << "\n========== Converting RenderDoc Captures ==========\n";
+                    for (std::uint32_t ci = 0; ci < rdcFiles.size(); ++ci) {
+                        std::string jsonOut = rdcFiles[ci];
+                        auto dotPos = jsonOut.rfind('.');
+                        if (dotPos != std::string::npos)
+                            jsonOut = jsonOut.substr(0, dotPos);
+                        jsonOut += ".json";
+
+#ifdef _WIN32
+                        std::string cmd =
+                            "\"\"C:\\Program Files\\RenderDoc\\renderdoccmd.exe\" convert"
+                            " -f \"" + rdcFiles[ci] + "\""
+                            " -c chrome.json"
+                            " -o \"" + jsonOut + "\"\"";
+#else
+                        std::string cmd = "renderdoccmd convert"
+                            " -f \"" + rdcFiles[ci] + "\""
+                            " -c chrome.json"
+                            " -o \"" + jsonOut + "\"";
+#endif
+
+                        std::cout << "  [" << (ci + 1) << "/" << rdcFiles.size()
+                                  << "] " << rdcFiles[ci] << "\n";
+                        int rcConv = std::system(cmd.c_str());
+                        if (rcConv != 0)
+                            std::cout << "    WARNING: conversion failed (exit "
+                                      << rcConv << ")\n";
+                        else
+                            std::cout << "    -> " << jsonOut << "\n";
+                    }
+                    std::cout << "====================================================\n";
+                }
+
+                // ---- RenderDoc timing analysis ----
+                std::string resultsPath = gpu_bench::ResultsFilePath();
+                if (!rdcFiles.empty()) {
+                    std::string rdocCmd =
+                        "python scripts" + sep + "rdoc_analyse.py"
+                        " --captures rdoc_captures"
+                        " --results \"" + resultsPath + "\""
+                        " --output docs" + sep + "rdoc_comparison.md";
+                    std::cout << "\n========== RenderDoc Timing Analysis ==========\n";
+                    int rcRdoc = runInProjectRoot(rdocCmd);
+                    if (rcRdoc != 0)
+                        std::cout << "  WARNING: rdoc_analyse.py failed (exit "
+                                  << rcRdoc << ")\n";
+                    else
+                        std::cout << "  Report saved to docs/rdoc_comparison.md\n";
+                    std::cout << "================================================\n";
+                }
+
+                // ---- Python chart generation ----
+                std::cout << "\n========== Generating Python Charts ==========\n";
+
+                std::string cmdPlot =
+                    "python scripts" + sep + "plot_results.py --save docs" + sep + "images";
+                std::string cmdExportMd =
+                    "python scripts" + sep + "export_report.py --md docs" + sep + "results-table.md";
+                std::string cmdExportHtml =
+                    "python scripts" + sep + "export_report.py --html docs" + sep + "report.html";
+
+                std::cout << "  [1/3] Generating charts...\n";
+                int rc1 = runInProjectRoot(cmdPlot);
+                if (rc1 != 0)
+                    std::cout << "  WARNING: plot_results.py failed (exit " << rc1
+                              << "). Is matplotlib installed? Run: pip install -r scripts/requirements.txt\n";
+                else
+                    std::cout << "  Charts saved to docs/images/\n";
+
+                std::cout << "  [2/3] Exporting Markdown table...\n";
+                int rc2 = runInProjectRoot(cmdExportMd);
+                if (rc2 != 0)
+                    std::cout << "  WARNING: export_report.py --md failed (exit " << rc2 << ")\n";
+                else
+                    std::cout << "  Markdown table saved to docs/results-table.md\n";
+
+                std::cout << "  [3/3] Exporting HTML report...\n";
+                int rc3 = runInProjectRoot(cmdExportHtml);
+                if (rc3 != 0)
+                    std::cout << "  WARNING: export_report.py --html failed (exit " << rc3 << ")\n";
+                else
+                    std::cout << "  HTML report saved to docs/report.html\n";
+
+                std::cout << "\n========== Full Analysis Complete ==========\n";
+                if (rc1 == 0 && rc2 == 0 && rc3 == 0)
+                    std::cout << "All outputs generated successfully.\n";
+                else
+                    std::cout << "Some Python scripts failed. Check if dependencies are installed:\n"
+                              << "  pip install -r scripts/requirements.txt\n";
+                std::cout << "============================================\n";
 
                 hasLastRun = (passed > 0);
                 directBenchmark = false;

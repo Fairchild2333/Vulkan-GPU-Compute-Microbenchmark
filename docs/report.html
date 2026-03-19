@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPU Benchmark Report</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f0f23; color: #e0e0e0;
+    padding: 2rem; line-height: 1.6;
+  }
+  h1 { color: #fff; margin-bottom: 0.5rem; }
+  .meta { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    margin-bottom: 2rem;
+  }
+  th {
+    background: #1a1a3e; color: #aaa; text-transform: uppercase;
+    font-size: 0.75rem; letter-spacing: 0.05em;
+    padding: 0.7rem 0.5rem; text-align: left; cursor: pointer;
+    border-bottom: 2px solid #333; white-space: nowrap;
+  }
+  th:hover { color: #fff; }
+  td {
+    padding: 0.5rem; border-bottom: 1px solid #222; white-space: nowrap;
+  }
+  tr:hover { background: #1a1a3e; }
+  .api-vulkan td:nth-child(3) { color: #E74C3C; font-weight: 600; }
+  .api-dx12 td:nth-child(3) { color: #3498DB; font-weight: 600; }
+  .api-dx11 td:nth-child(3) { color: #2ECC71; font-weight: 600; }
+  .api-opengl td:nth-child(3) { color: #F39C12; font-weight: 600; }
+  .api-metal td:nth-child(3) { color: #9B59B6; font-weight: 600; }
+  footer { color: #555; font-size: 0.8rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>GPU Compute Microbenchmark Report</h1>
+<p class="meta">
+  Generated: 2026-03-20 01:08 &bull;
+  9 result(s) &bull;
+  Ranked by Average FPS (descending)
+</p>
+<table id="results">
+<thead><tr>
+  <th>#</th><th>GPU</th><th>API</th><th>Particles</th><th>Avg FPS</th>
+  <th>GPU (ms)</th><th>Compute (ms)</th><th>Render (ms)</th>
+  <th>Frame (ms)</th><th>CPU OH (ms)</th><th>Bottleneck</th>
+  <th>Memory</th><th>CPU</th><th>Timestamp</th>
+</tr></thead>
+<tbody>
+        <tr class="api-vulkan">
+          <td>1</td><td>RTX 5090</td><td>Vulkan</td>
+          <td>1,048,576</td><td>3,832</td>
+          <td>0.090</td><td>0.025</td><td>0.064</td>
+          <td>0.261</td><td>0.171</td>
+          <td>CPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:06:44</td>
+        </tr>
+        <tr class="api-dx11">
+          <td>2</td><td>RTX 5090</td><td>DX11</td>
+          <td>1,048,576</td><td>3,601</td>
+          <td>0.086</td><td>0.020</td><td>0.049</td>
+          <td>0.278</td><td>0.192</td>
+          <td>CPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:07:15</td>
+        </tr>
+        <tr class="api-dx12">
+          <td>3</td><td>RTX 5090 (FL 12_1)</td><td>DX12</td>
+          <td>1,048,576</td><td>2,967</td>
+          <td>0.065</td><td>0.014</td><td>0.050</td>
+          <td>0.337</td><td>0.272</td>
+          <td>CPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:07:00</td>
+        </tr>
+        <tr class="api-opengl">
+          <td>4</td><td>RTX 5090/PCIe/SSE2</td><td>OpenGL</td>
+          <td>1,048,576</td><td>2,745</td>
+          <td>0.091</td><td>0.020</td><td>0.069</td>
+          <td>0.364</td><td>0.273</td>
+          <td>CPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:07:30</td>
+        </tr>
+        <tr class="api-dx12">
+          <td>5</td><td>AMD Radeon iGPU (FL 12_1)</td><td>DX12</td>
+          <td>1,048,576</td><td>307</td>
+          <td>3.138</td><td>1.616</td><td>1.507</td>
+          <td>3.254</td><td>0.116</td>
+          <td>GPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:08:01</td>
+        </tr>
+        <tr class="api-dx11">
+          <td>6</td><td>AMD Radeon iGPU</td><td>DX11</td>
+          <td>1,048,576</td><td>245</td>
+          <td>3.964</td><td>1.477</td><td>1.440</td>
+          <td>4.076</td><td>0.112</td>
+          <td>GPU-bound</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:08:16</td>
+        </tr>
+        <tr class="api-vulkan">
+          <td>7</td><td>AMD Radeon iGPU</td><td>Vulkan</td>
+          <td>1,048,576</td><td>221</td>
+          <td>3.426</td><td>1.374</td><td>2.052</td>
+          <td>4.516</td><td>1.090</td>
+          <td>Balanced</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:07:45</td>
+        </tr>
+        <tr class="api-dx12">
+          <td>8</td><td>Microsoft WARP (CPU Software Renderer)</td><td>DX12</td>
+          <td>1,048,576</td><td>83</td>
+          <td>11.446</td><td>1.068</td><td>10.377</td>
+          <td>11.997</td><td>0.551</td>
+          <td>Software</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:08:32</td>
+        </tr>
+        <tr class="api-dx11">
+          <td>9</td><td>Microsoft WARP (CPU Software Renderer)</td><td>DX11</td>
+          <td>1,048,576</td><td>51</td>
+          <td>19.362</td><td>0.468</td><td>10.879</td>
+          <td>19.576</td><td>0.214</td>
+          <td>Software</td><td>Device-local</td>
+          <td>AMD Ryzen 7 9800X3D 8-Core Processor           </td><td>2026-03-20 01:08:47</td>
+        </tr>
+</tbody>
+</table>
+<footer>
+  GPU Compute Microbenchmark &mdash; github.com/your-repo
+</footer>
+<script>
+document.querySelectorAll('#results th').forEach((th, col) => {
+  th.addEventListener('click', () => {
+    const tbody = document.querySelector('#results tbody');
+    const rows = [...tbody.querySelectorAll('tr')];
+    const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+    th.dataset.dir = dir;
+    rows.sort((a, b) => {
+      let av = a.children[col].textContent.replace(/,/g, '');
+      let bv = b.children[col].textContent.replace(/,/g, '');
+      let an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn))
+        return dir === 'asc' ? an - bn : bn - an;
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    rows.forEach((r, i) => { r.children[0].textContent = i + 1; tbody.appendChild(r); });
+  });
+});
+</script>
+</body>
+</html>

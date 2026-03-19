@@ -28,6 +28,7 @@ public:
     virtual std::string GetDeviceName() const  = 0;
     virtual std::string GetDriverVersion() const { return ""; }
     virtual bool NeedsOpenGLContext() const { return false; }
+    const std::string& GetLastCapturePath() const { return lastCapturePath_; }
 
 protected:
     virtual void InitBackend()            = 0;
@@ -47,7 +48,12 @@ protected:
     GLFWwindow*     window_ = nullptr;
     std::vector<Particle> initialParticles_;
 
+    bool IsRenderDocAttached() const { return rdocApi_ != nullptr; }
+    void TriggerRenderDocCapture();
+    std::uint32_t GetRenderDocCaptureCount() const;
+
 private:
+    void InitRenderDoc();
     void InitWindow();
     void GenerateInitialParticles();
     void MainLoop();
@@ -55,6 +61,11 @@ private:
     void PrintSummary() const;
     BenchmarkResult CollectResult() const;
     void CleanupWindow();
+
+    void* rdocApi_ = nullptr;
+    bool     rdocCaptureRequested_ = false;
+    uint32_t rdocCaptureCount_     = 0;
+    std::string lastCapturePath_;
 
     double        lastFrameTime_      = 0.0;
     double        runStartTime_       = 0.0;

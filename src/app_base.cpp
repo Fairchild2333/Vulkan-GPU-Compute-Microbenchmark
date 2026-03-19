@@ -1,4 +1,5 @@
 #include "app_base.h"
+#include "renderdoc_app.h"
 
 #include <GLFW/glfw3.h>
 
@@ -12,8 +13,11 @@
 #define NOMINMAX
 #include <windows.h>
 #include <winnt.h>
+#include <direct.h>
 #elif defined(__linux__)
+#include <dlfcn.h>
 #include <fstream>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>
@@ -139,7 +143,76 @@ AppBase::~AppBase() {
     CleanupWindow();
 }
 
+// -----------------------------------------------------------------------
+// RenderDoc In-Application API
+// -----------------------------------------------------------------------
+
+void AppBase::InitRenderDoc() {
+#ifdef _WIN32
+    HMODULE mod = GetModuleHandleA("renderdoc.dll");
+    if (!mod)
+        mod = LoadLibraryA("C:\\Program Files\\RenderDoc\\renderdoc.dll");
+    if (!mod) return;
+    auto RENDERDOC_GetAPI =
+        reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(mod, "RENDERDOC_GetAPI"));
+#elif defined(__linux__)
+    void* mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
+    if (!mod)
+        mod = dlopen("librenderdoc.so", RTLD_NOW);
+    if (!mod) return;
+    auto RENDERDOC_GetAPI =
+        reinterpret_cast<pRENDERDOC_GetAPI>(dlsym(mod, "RENDERDOC_GetAPI"));
+#else
+    return;
+#endif
+
+    if (!RENDERDOC_GetAPI) return;
+    RENDERDOC_API_1_6_0* api = nullptr;
+    int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_6_0, reinterpret_cast<void**>(&api));
+    if (ret != 1 || !api) return;
+    rdocApi_ = api;
+
+    api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureCallstacks, 1);
+    api->SetCaptureOptionU32(eRENDERDOC_Option_RefAllResources, 1);
+    api->SetCaptureOptionU32(eRENDERDOC_Option_SaveAllInitials, 1);
+
+#ifdef _WIN32
+    std::string capDir = shaderDir_ + "..\\..\\rdoc_captures\\";
+    _mkdir(capDir.c_str());
+#else
+    std::string capDir = shaderDir_ + "../../rdoc_captures/";
+    mkdir(capDir.c_str(), 0755);
+#endif
+    std::string backendTag = GetBackendName();
+    for (auto& ch : backendTag)
+        if (ch == ' ' || ch == '.') ch = '_';
+    std::string pathTemplate = capDir + backendTag;
+    api->SetCaptureFilePathTemplate(pathTemplate.c_str());
+
+    int major = 0, minor = 0, patch = 0;
+    api->GetAPIVersion(&major, &minor, &patch);
+
+    std::cout << "\n============================================\n"
+              << "  RenderDoc detected! (API "
+              << major << "." << minor << "." << patch << ")\n"
+              << "  Press F12 during rendering to capture a frame.\n"
+              << "  Captures saved to: " << capDir << "\n"
+              << "============================================\n\n" << std::flush;
+}
+
+void AppBase::TriggerRenderDocCapture() {
+    if (!rdocApi_) return;
+    rdocCaptureRequested_ = true;
+}
+
+std::uint32_t AppBase::GetRenderDocCaptureCount() const {
+    return rdocCaptureCount_;
+}
+
+// -----------------------------------------------------------------------
+
 void AppBase::Run() {
+    InitRenderDoc();
     InitWindow();
     GenerateInitialParticles();
     InitBackend();
@@ -207,8 +280,33 @@ void AppBase::MainLoop() {
     const std::uint32_t totalBenchFrames =
         config_.benchFrames + config_.warmupFrames;
 
+    bool f12WasPressed = false;
+    bool timeCaptureTriggered = false;
+
     while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
         glfwPollEvents();
+
+        auto* rdoc = static_cast<RENDERDOC_API_1_6_0*>(rdocApi_);
+        if (rdoc) {
+            bool f12Down = glfwGetKey(window_, GLFW_KEY_F12) == GLFW_PRESS;
+            if (f12Down && !f12WasPressed)
+                rdocCaptureRequested_ = true;
+            f12WasPressed = f12Down;
+
+            const double elapsed = glfwGetTime() - runStartTime_;
+            if (config_.captureAtSec > 0.0 && !timeCaptureTriggered &&
+                elapsed >= config_.captureAtSec) {
+                rdocCaptureRequested_ = true;
+                timeCaptureTriggered = true;
+            }
+        }
+
+        bool capturing = false;
+        if (rdoc && rdocCaptureRequested_) {
+            rdoc->StartFrameCapture(nullptr, nullptr);
+            capturing = true;
+            rdocCaptureRequested_ = false;
+        }
 
         const double currentTime = glfwGetTime();
         const auto   deltaTime   = static_cast<float>(currentTime - lastFrameTime_);
@@ -216,6 +314,26 @@ void AppBase::MainLoop() {
 
         DrawFrame(deltaTime);
         ++totalFrameCount_;
+
+        if (capturing && rdoc) {
+            rdoc->EndFrameCapture(nullptr, nullptr);
+            ++rdocCaptureCount_;
+
+            uint32_t idx = rdocCaptureCount_ - 1;
+            char filePath[512] = {};
+            uint32_t pathLen = sizeof(filePath);
+            uint64_t timestamp = 0;
+            if (rdoc->GetCapture(idx, filePath, &pathLen, &timestamp))
+                lastCapturePath_ = filePath;
+
+            double capTime = glfwGetTime() - runStartTime_;
+            std::cout << "[RenderDoc] Captured at " << std::fixed
+                      << std::setprecision(1) << capTime << "s (frame "
+                      << totalFrameCount_ << ")\n";
+            if (!lastCapturePath_.empty())
+                std::cout << "  -> " << lastCapturePath_ << "\n";
+            std::cout << std::flush;
+        }
 
         const double elapsed = currentTime - runStartTime_;
 

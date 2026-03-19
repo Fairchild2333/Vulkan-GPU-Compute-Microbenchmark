@@ -78,7 +78,13 @@ void MetalBackend::InitBackend() {
 
         std::cout << "Available GPUs:\n";
         for (NSUInteger i = 0; i < devices.count; ++i) {
-            std::cout << "  [" << i << "] " << [devices[i].name UTF8String] << '\n';
+            id<MTLDevice> dev = devices[i];
+            std::uint64_t vramMB = dev.recommendedMaxWorkingSetSize / (1024 * 1024);
+            std::string tag;
+            if (dev.isLowPower) tag = " (low-power / iGPU)";
+            else if (dev.isHeadless) tag = " (headless / compute-only)";
+            std::cout << "  [" << i << "] " << [dev.name UTF8String]
+                      << " — " << vramMB << " MB" << tag << '\n';
         }
 
         NSUInteger chosen = 0;
@@ -88,10 +94,14 @@ void MetalBackend::InitBackend() {
                 throw std::runtime_error("Requested GPU index out of range");
             chosen = idx;
         } else if (devices.count > 1) {
-            std::cout << "Enter GPU index to use: ";
+            std::cout << "Enter GPU index (or 'b' to go back): " << std::flush;
             std::string line;
-            if (std::getline(std::cin, line) && !line.empty())
-                chosen = static_cast<NSUInteger>(std::stoi(line));
+            if (std::getline(std::cin, line)) {
+                if (line == "b" || line == "B")
+                    throw gpu_bench::BackToMenuException();
+                if (!line.empty())
+                    chosen = static_cast<NSUInteger>(std::stoi(line));
+            }
         }
 
         impl_->device     = devices[chosen];

@@ -38,6 +38,7 @@ struct BenchmarkConfig {
     std::uint32_t warmupFrames       = 100;
     std::uint32_t particleCount      = kParticleCount;
     const char*   difficultyLabel    = "Medium";
+    double        captureAtSec       = -1.0;
 };
 
 }  // namespace gpu_bench

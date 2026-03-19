@@ -92,6 +92,16 @@ private:
     float       timestampPeriodNs_  = 0.0f;
     bool        timestampsSupported_ = false;
 
+    PFN_vkCmdBeginDebugUtilsLabelEXT  vkCmdBeginDebugUtilsLabel_  = nullptr;
+    PFN_vkCmdEndDebugUtilsLabelEXT    vkCmdEndDebugUtilsLabel_    = nullptr;
+    PFN_vkSetDebugUtilsObjectNameEXT  vkSetDebugUtilsObjectName_  = nullptr;
+    bool debugUtilsAvailable_ = false;
+
+    void LoadDebugUtilsFunctions();
+    void SetObjectName(VkObjectType type, std::uint64_t handle, const char* name) const;
+    void BeginDebugLabel(VkCommandBuffer cmd, const char* name, float r, float g, float b) const;
+    void EndDebugLabel(VkCommandBuffer cmd) const;
+
     static constexpr const char* kRequiredDeviceExtensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     };

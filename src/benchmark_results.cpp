@@ -26,11 +26,24 @@ namespace gpu_bench {
 
 static std::string ResultsDir() {
 #ifdef _WIN32
+    char homePath[MAX_PATH] = {};
+    if (SHGetFolderPathA(nullptr, CSIDL_PROFILE, nullptr, 0, homePath) == S_OK) {
+        std::string dir = std::string(homePath) + "\\.gpu_bench";
+        _mkdir(dir.c_str());
+        return dir;
+    }
     _mkdir("results");
-#else
-    mkdir("results", 0755);
-#endif
     return "results";
+#else
+    const char* home = std::getenv("HOME");
+    if (home) {
+        std::string dir = std::string(home) + "/.gpu_bench";
+        mkdir(dir.c_str(), 0755);
+        return dir;
+    }
+    mkdir("results", 0755);
+    return "results";
+#endif
 }
 
 std::string ResultsFilePath() {

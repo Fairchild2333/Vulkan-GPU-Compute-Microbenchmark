@@ -85,13 +85,13 @@ if(ENABLE_METAL AND APPLE)
     find_library(COCOA_FRAMEWORK Cocoa)
 
     if(METAL_FRAMEWORK)
-        list(APPEND BACKEND_SOURCES src/metal_backend.mm)
+        list(APPEND BACKEND_SOURCES src/metal_backend.mm src/metal_probe.mm)
         list(APPEND BACKEND_LIBS
             ${METAL_FRAMEWORK} ${QUARTZCORE_FRAMEWORK} ${COCOA_FRAMEWORK})
         list(APPEND BACKEND_DEFS HAVE_METAL)
 
-        set_source_files_properties(src/metal_backend.mm PROPERTIES
-            COMPILE_FLAGS "-fobjc-arc"
+        set_source_files_properties(src/metal_backend.mm src/metal_probe.mm
+            PROPERTIES COMPILE_FLAGS "-fobjc-arc"
         )
 
         message(STATUS "Metal backend:  ENABLED")
