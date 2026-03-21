@@ -570,7 +570,7 @@ On an integrated GPU, this penalty disappears because host-visible and device-lo
 
 **Native API support:** WARP natively implements **Direct3D 11** and **Direct3D 12** only. It does **not** implement Vulkan or OpenGL. If Vulkan is reported as available on a WARP-only system, this is provided by **Mesa Dozen** — a Vulkan-on-D3D12 translation layer distributed via the Microsoft Store's *OpenCL, OpenGL & Vulkan Compatibility Pack*. Similarly, OpenGL support on WARP comes from **OpenGLOn12** in the same compatibility pack. Both layers translate their respective API calls to D3D12, which WARP then executes on the CPU.
 
-### 4a. Hardware GPU vs WARP
+### 9a. Hardware GPU vs WARP
 
 | Metric | RTX 5090 / DX12 (Hardware) | WARP / DX12 (Software) |
 |--------|--------------------|-----------------------------|
@@ -581,7 +581,7 @@ On an integrated GPU, this penalty disappears because host-visible and device-lo
 
 WARP demonstrates a ~80× performance gap compared to hardware GPU execution, which is expected for CPU-based software rasterisation.
 
-### 4b. WARP: DX11 vs DX12
+### 9b. WARP: DX11 vs DX12
 
 | Metric | WARP + DX11 | WARP + DX12 |
 |--------|-------------|-------------|
@@ -598,7 +598,7 @@ On hardware GPUs, DX11 outperforms DX12/Vulkan because the driver's implicit sta
 
 This observation reinforces that the DX11 driver's "free optimisation" is specifically valuable for **hardware GPU command submission** — when that hardware is absent, the optimisation layer becomes a liability.
 
-### 4c. WARP as a Vulkan Device — Dozen Translation Layer
+### 9c. WARP as a Vulkan Device — Dozen Translation Layer
 
 On systems without a native Vulkan ICD (e.g. Windows on ARM VMs, virtual GPUs), the Vulkan loader may enumerate **"Microsoft Basic Render Driver"** as a Vulkan physical device. The full call chain is:
 
@@ -663,7 +663,7 @@ DX11 is the only API in the benchmark where GPU timestamp queries can silently f
 
 Three distinct failure modes were observed during testing:
 
-### 6a. Driver Never Resolves Queries (`GetData` → `S_FALSE` indefinitely)
+### 11a. Driver Never Resolves Queries (`GetData` → `S_FALSE` indefinitely)
 
 **Affected:** Windows on ARM virtual machines (SVGA virtual GPU driver).
 
@@ -673,7 +673,7 @@ This is a **driver limitation**: the virtual GPU driver accepts query creation b
 
 See [`docs/woa-dx11-timestamp-issue.md`](woa-dx11-timestamp-issue.md) for a detailed write-up.
 
-### 6b. GPU Clock Frequency Instability (`Disjoint = TRUE`)
+### 11b. GPU Clock Frequency Instability (`Disjoint = TRUE`)
 
 **Affected:** Integrated GPUs under fluctuating load, discrete GPUs during power-state transitions.
 
@@ -687,7 +687,7 @@ The D3D11 specification recommends discarding the entire frame's timing data whe
 
 **Mitigation implemented:** The application now caches the last known stable frequency (`lastGoodFrequency`). When `Disjoint = TRUE`, timestamps are still read and converted using the cached frequency rather than being discarded. This mirrors the behaviour of Vulkan/DX12 — accepting marginally less precise data in exchange for continuous availability.
 
-### 6c. Query Pipeline Too Shallow (Ring Buffer Depth)
+### 11c. Query Pipeline Too Shallow (Ring Buffer Depth)
 
 **Affected:** Slow GPUs (integrated, software renderer) under high particle counts.
 
@@ -742,7 +742,7 @@ DX11 is the only API that can actively **withhold** timestamp data based on GPU 
 
 The HD 5770 only supports DX11 and OpenGL 4.3 — no Vulkan or DX12 drivers exist for TeraScale 2 hardware. The Ryzen 7600 iGPU supports all four APIs.
 
-### 7a. Raw Results — 1M Particles (Medium)
+### 12a. Raw Results — 1M Particles (Medium)
 
 | # | API | GPU | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | Utilisation |
 |---|-----|-----|---------|-------------|------------|---------------|-------------|
@@ -755,7 +755,7 @@ The HD 5770 only supports DX11 and OpenGL 4.3 — no Vulkan or DX12 drivers exis
 | 7 | DX12 | WARP (CPU) | 64 | — | — | 15.234 | — |
 | 8 | DX11 | WARP (CPU) | 45 | — | — | 21.954 | — |
 
-### 7b. Same-API Head-to-Head
+### 12b. Same-API Head-to-Head
 
 | API | HD 5770 FPS | iGPU FPS | iGPU Advantage |
 |-----|-------------|----------|----------------|
@@ -764,7 +764,7 @@ The HD 5770 only supports DX11 and OpenGL 4.3 — no Vulkan or DX12 drivers exis
 
 The RDNA 2 integrated GPU outperforms the HD 5770 discrete GPU in **every** comparable API, despite having far fewer hardware resources on paper.
 
-### 7c. Theoretical TFLOPS Comparison
+### 12c. Theoretical TFLOPS Comparison
 
 | | HD 5770 | Ryzen 5 7600 iGPU |
 |--|---------|----------------|
@@ -780,7 +780,7 @@ The HD 5770 has **2.4× more raw FP32 TFLOPS** than the iGPU, yet it is **42–7
 
 **The discrepancy between TFLOPS rankings and benchmark results is itself a validation of the test.** If results tracked TFLOPS perfectly, it would suggest the benchmark is merely saturating ALU throughput with a trivially parallel workload — essentially an artificial peak-FLOPS test. The fact that a 0.56 TFLOPS GPU outperforms a 1.36 TFLOPS GPU confirms that this benchmark exercises real-world bottlenecks — memory access patterns, compute scheduler overhead, wave occupancy, and driver-side code generation — rather than measuring a synthetic upper bound.
 
-### 7d. Why the iGPU Wins Despite Lower TFLOPS
+### 12d. Why the iGPU Wins Despite Lower TFLOPS
 
 **Architecture efficiency matters more than shader count.** TeraScale 2 uses a VLIW5 (Very Long Instruction Word) design where each "stream processor" is actually five tightly coupled ALUs that must execute in lockstep. If the compiler cannot fill all five slots (a common occurrence for compute shaders with irregular control flow), the vacant slots are wasted. Real-world VLIW5 utilisation in compute workloads is estimated at 50–70%, reducing the HD 5770's effective throughput to roughly 0.7–0.95 TFLOPS.
 
@@ -794,7 +794,7 @@ RDNA 2, by contrast, uses a scalar + SIMD32 design where each compute unit conta
 
 **Memory bandwidth parity.** The HD 5770's theoretical advantage in dedicated GDDR5 is largely neutralised here. Its 76.8 GB/s bandwidth is slightly below the iGPU's ~83 GB/s from dual-channel DDR5-6000 C28. For a bandwidth-sensitive particle simulation, this effectively levels the playing field — or tilts it slightly in the iGPU's favour.
 
-### 7e. Would the HD 5770 Win in a Gaming Benchmark?
+### 12e. Would the HD 5770 Win in a Gaming Benchmark?
 
 Very likely **yes**, for traditional 3D rendering workloads. The HD 5770 has 6.25× more shader units, 5× more texture mapping units, and 4× more render output units than the 2-CU iGPU. In a conventional rasterisation pipeline — vertex processing, texture sampling, pixel shading, and blending — these fixed-function resources matter far more than per-CU compute efficiency.
 
@@ -806,7 +806,379 @@ This makes the benchmark a useful complement to traditional GPU tests. A gaming 
 
 ---
 
-## 13. Summary
+## 13. AMD GPU Generational Analysis — TeraScale 2 → GCN → RDNA 2
+
+> Cross-generational compute shader performance comparison across seven AMD
+> GPUs spanning four architectures and 15 years of hardware evolution
+> (2009–2024). All results collected with this project's particle simulation
+> benchmark.
+
+### Test Hardware
+
+| GPU | Architecture | Generation | CUs / SPs | Core Clock | FP32 TFLOPS | Memory | Bandwidth | Platform | API Coverage |
+|-----|-------------|-----------|-----------|-----------|-------------|--------|-----------|----------|-------------|
+| HD 5770 | TeraScale 2 | 2009 | 800 SPs (VLIW5) | 850 MHz | ~1.36 | 1 GB GDDR5 | 76.8 GB/s | Windows | DX11, OpenGL |
+| FirePro D700 ×2 | GCN 1.0 (Tahiti) | 2013 | 2048 SPs | 850 MHz | ~3.5 | 6 GB GDDR5 | 264 GB/s | macOS | Metal |
+| RX 580 | GCN 4 (Polaris) | 2017 | 36 CUs | 1,340 MHz | ~6.2 | 8 GB GDDR5 | 256 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+| Vega Frontier Edition | GCN 5 (Vega) | 2017 | 64 CUs | 1,600 MHz | ~13.1 | 16 GB HBM2 | 483 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+| RX 6600 XT | RDNA 2 | 2021 | 32 CUs | 2,589 MHz | ~10.6 | 8 GB GDDR6 | 256 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+| RX 6900 XT | RDNA 2 | 2020 | 80 CUs | 2,250 MHz | ~23.0 | 16 GB GDDR6 | 512 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+| Ryzen 9800X3D iGPU | RDNA 2 | 2024 | 2 CUs | 2,200 MHz | ~0.56 | Shared DDR5 | ~83 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+
+> **Note:** FirePro D700 data is from macOS Metal only. The Mac Pro 2013
+> does not run Windows natively, so no DX/Vulkan comparison is available
+> for GCN 1.0. All other GPUs are tested on the same Windows 11 platform.
+
+---
+
+### 13a. Raw Results — All AMD GPUs, 1M Particles (Medium)
+
+**Best API per GPU (highest FPS):**
+
+| # | GPU | Architecture | Best API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | Bottleneck |
+|---|-----|-------------|----------|---------|-------------|------------|---------------|------------|
+| 1 | RX 6900 XT | RDNA 2 (80 CU) | | | | | | |
+| 2 | RX 6600 XT | RDNA 2 (32 CU) | | | | | | |
+| 3 | Vega FE | GCN 5 (64 CU) | | | | | | |
+| 4 | RX 580 | GCN 4 (36 CU) | | | | | | |
+| 5 | FirePro D700 | GCN 1.0 | Metal | | | | | |
+| 6 | iGPU (2 CU) | RDNA 2 | | | | | | |
+| 7 | HD 5770 | TeraScale 2 | | | | | | |
+| 8 | WARP (CPU) | Software | | | | | | |
+
+**All API results per GPU:**
+
+<!-- Fill in after running all benchmarks. One row per GPU × API combination. -->
+
+| GPU | Vulkan | DX12 | DX11 | OpenGL | Metal |
+|-----|--------|------|------|--------|-------|
+| RX 6900 XT | — FPS | — FPS | — FPS | — FPS | N/A |
+| RX 6600 XT | — FPS | — FPS | — FPS | — FPS | N/A |
+| Vega FE | — FPS | — FPS | — FPS | — FPS | N/A |
+| RX 580 | — FPS | — FPS | — FPS | — FPS | N/A |
+| FirePro D700 | N/A | N/A | N/A | N/A | — FPS |
+| iGPU (2 CU) | — FPS | — FPS | — FPS | — FPS | N/A |
+| HD 5770 | N/A | N/A | — FPS | — FPS | N/A |
+
+---
+
+### 13b. Per-CU Compute Efficiency
+
+Normalise compute shader performance to **per-CU throughput** to isolate
+architectural efficiency from raw CU count.
+
+| GPU | Architecture | CUs | Compute Time (ms) | Per-CU Throughput (relative) | Per-CU vs RX 580 |
+|-----|-------------|-----|--------------------|------------------------------|-------------------|
+| HD 5770 | TeraScale 2 | ~10 equiv | | | |
+| FirePro D700 | GCN 1.0 | 32 | | | |
+| RX 580 | GCN 4 | 36 | | **1.00×** | — |
+| Vega FE | GCN 5 | 64 | | | |
+| RX 6600 XT | RDNA 2 | 32 | | | |
+| RX 6900 XT | RDNA 2 | 80 | | | |
+| iGPU (2 CU) | RDNA 2 | 2 | | | |
+
+> **HD 5770 CU equivalence:** TeraScale 2 does not have CUs. 800 VLIW5
+> stream processors are roughly grouped into 10 SIMD engines. This mapping
+> is approximate.
+
+**Analysis to write:**
+
+<!-- After filling data:
+- How much does per-CU efficiency improve from GCN 1.0 → GCN 4 → GCN 5 → RDNA 2?
+- Is the per-CU improvement consistent, or are there architecture jumps?
+- Does the iGPU (2 CU) match per-CU performance of the 6900 XT (80 CU)?
+  If yes, RDNA 2 scales linearly. If no, explain why (memory bandwidth,
+  cache contention, occupancy).
+-->
+
+---
+
+### 13c. CU Scaling Within RDNA 2
+
+Three RDNA 2 GPUs at vastly different CU counts allow direct measurement of
+how compute performance scales with CU count within the same architecture.
+
+| GPU | CUs | FPS | Compute (ms) | Scaling vs iGPU (2 CU) | Ideal Scaling (CU ratio) | Efficiency |
+|-----|-----|-----|-------------|------------------------|--------------------------|------------|
+| iGPU (2 CU) | 2 | | | 1.00× | 1.00× | |
+| RX 6600 XT | 32 | | | | 16.0× | |
+| RX 6900 XT | 80 | | | | 40.0× | |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- Does the 6600 XT achieve 16× the iGPU's performance (CU ratio)?
+- Does the 6900 XT achieve 40× the iGPU's performance?
+- If scaling is sub-linear, identify the bottleneck: memory bandwidth,
+  cache hierarchy, or dispatch overhead.
+- If scaling is super-linear, explain: larger L2 cache, higher bandwidth,
+  better occupancy at higher CU counts.
+-->
+
+---
+
+### 13d. Architecture Generational Progression
+
+Normalise all GPUs to the **RX 580 (GCN 4) = 1.00×** baseline for
+generational comparison.
+
+| GPU | Architecture | Year | FPS | vs RX 580 | Memory BW | BW vs RX 580 |
+|-----|-------------|------|-----|-----------|-----------|-------------|
+| HD 5770 | TeraScale 2 | 2009 | | | 76.8 GB/s | 0.30× |
+| FirePro D700 | GCN 1.0 | 2013 | | | 264 GB/s | 1.03× |
+| **RX 580** | **GCN 4** | **2017** | | **1.00×** | **256 GB/s** | **1.00×** |
+| Vega FE | GCN 5 | 2017 | | | 483 GB/s | 1.89× |
+| RX 6600 XT | RDNA 2 | 2021 | | | 256 GB/s | 1.00× |
+| RX 6900 XT | RDNA 2 | 2020 | | | 512 GB/s | 2.00× |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- Does the performance ranking follow the memory bandwidth ranking?
+  (This benchmark is bandwidth-bound at 1M particles.)
+- Vega FE has 1.89× the bandwidth of RX 580 — does it achieve ~1.89× FPS?
+- RX 6600 XT has the same bandwidth as RX 580 but newer architecture —
+  how much does RDNA 2 efficiency contribute beyond bandwidth?
+- How does the FPS progression compare to the TFLOPS progression?
+  (Continues the Section 12 finding that TFLOPS is a poor predictor.)
+-->
+
+---
+
+### 13e. Cross-API Performance Variation by Architecture
+
+Does the API ranking (DX11 > DX12 > Vulkan > OpenGL) observed on RTX 5090
+hold across all AMD architectures, or does it change?
+
+| GPU | Architecture | Fastest API | DX11 FPS | DX12 FPS | Vulkan FPS | OpenGL FPS | DX11 vs Vulkan Gap |
+|-----|-------------|------------|----------|----------|------------|------------|-------------------|
+| HD 5770 | TeraScale 2 | | | N/A | N/A | | |
+| RX 580 | GCN 4 | | | | | | |
+| Vega FE | GCN 5 | | | | | | |
+| RX 6600 XT | RDNA 2 | | | | | | |
+| RX 6900 XT | RDNA 2 | | | | | | |
+| iGPU (2 CU) | RDNA 2 | | | | | | |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- Is DX11 still fastest on AMD GPUs, or does AMD's Vulkan driver
+  (open-source Mesa RADV or proprietary AMDVLK) change the ranking?
+- Does the DX11-vs-Vulkan CPU overhead gap shrink on AMD compared to
+  NVIDIA? (AMD's DX11 driver is historically less optimised than NVIDIA's.)
+- On older GPUs (HD 5770, RX 580), is OpenGL competitive with DX11?
+- Does the API ranking change when the GPU is the bottleneck (high
+  particle count) vs when the CPU is the bottleneck (low particle count)?
+-->
+
+---
+
+### 13f. Memory Bandwidth as Performance Predictor
+
+Plot FPS against memory bandwidth to test the hypothesis that this benchmark
+is bandwidth-bound.
+
+| GPU | Memory BW (GB/s) | FPS (best API) | FPS / (GB/s) |
+|-----|-------------------|----------------|---------------|
+| HD 5770 | 76.8 | | |
+| FirePro D700 | 264 | | |
+| RX 580 | 256 | | |
+| Vega FE (HBM2) | 483 | | |
+| RX 6600 XT | 256 | | |
+| RX 6900 XT | 512 | | |
+| iGPU (DDR5) | ~83 | | |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- Calculate R² of FPS vs memory bandwidth across all AMD GPUs.
+- If R² > 0.85, the benchmark is confirmed bandwidth-bound on AMD hardware.
+- Identify outliers: does Vega FE's HBM2 over-perform or under-perform
+  relative to its bandwidth? (HBM2 has higher effective bandwidth due to
+  wider bus and lower latency.)
+- Does the iGPU's shared DDR5 behave differently from dedicated GDDR?
+  (Shared memory competes with CPU traffic.)
+-->
+
+---
+
+### 13g. Particle Count Scaling — GPU-Bound vs CPU-Bound Crossover
+
+Run each GPU at multiple particle counts to find the crossover point where
+the bottleneck shifts from CPU to GPU.
+
+| GPU | 65K FPS | 1M FPS | 4M FPS | 16M FPS | CPU→GPU Crossover |
+|-----|---------|--------|--------|---------|-------------------|
+| RX 6900 XT | | | | | |
+| RX 6600 XT | | | | | |
+| Vega FE | | | | | |
+| RX 580 | | | | | |
+| HD 5770 | | | | N/A (OOM?) | |
+| iGPU (2 CU) | | | | N/A (OOM?) | |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- At 65K particles, all GPUs should be CPU-bound — does FPS vary by API
+  more than by GPU?
+- At what particle count does each GPU become GPU-bound?
+  (When FPS starts dropping proportionally with particle count.)
+- Faster GPUs should stay CPU-bound longer — does the 6900 XT crossover
+  at a higher particle count than the RX 580?
+- HD 5770 has 1 GB VRAM — at what particle count does it run out of memory?
+  (Each particle = 32 bytes; 16M particles = 512 MB.)
+-->
+
+---
+
+### 13h. RenderDoc Cross-GPU Frame Analysis
+
+Capture one Vulkan frame on each AMD GPU (where Vulkan is available) and
+compare per-event GPU timing, barrier cost, and command structure.
+
+> Captures generated via `--capture 5` (auto-capture at 5 seconds).
+> Analysis automated with `scripts/rdoc_analyse.py` and
+> `scripts/rdoc_export_timing.py`.
+
+#### Per-Event GPU Timing Comparison
+
+| GPU | Architecture | Compute Dispatch (ms) | Barrier (ms) | Render Pass (ms) | Total GPU (ms) |
+|-----|-------------|-----------------------|-------------|-------------------|----------------|
+| RX 6900 XT | RDNA 2 (80 CU) | | | | |
+| RX 6600 XT | RDNA 2 (32 CU) | | | | |
+| Vega FE | GCN 5 (64 CU) | | | | |
+| RX 580 | GCN 4 (36 CU) | | | | |
+| iGPU (2 CU) | RDNA 2 | | | | |
+
+> HD 5770 and FirePro D700 excluded — no Vulkan support.
+
+#### App Timestamp vs RenderDoc Cross-Validation
+
+| GPU | Metric | App Timestamp (ms) | RenderDoc (ms) | Deviation |
+|-----|--------|-------------------|----------------|-----------|
+| RX 6900 XT | Compute | | | |
+| RX 6900 XT | Render | | | |
+| RX 6600 XT | Compute | | | |
+| RX 6600 XT | Render | | | |
+| RX 580 | Compute | | | |
+| RX 580 | Render | | | |
+
+> Target: < 5% deviation across all GPUs. Larger deviations indicate
+> driver-specific timestamp query behaviour.
+>
+> Generated with: `python scripts/compare_rdoc_timing.py <rdoc_json_files>`
+
+#### Barrier Cost Comparison
+
+| GPU | Architecture | Memory Type | Barrier Duration (ms) | Notes |
+|-----|-------------|-------------|----------------------|-------|
+| RX 6900 XT | RDNA 2 | 16 GB GDDR6 | | L2 writeback required |
+| RX 6600 XT | RDNA 2 | 8 GB GDDR6 | | Smaller L2 → faster flush? |
+| Vega FE | GCN 5 | 16 GB HBM2 | | HBM2 lower latency |
+| RX 580 | GCN 4 | 8 GB GDDR5 | | |
+| iGPU (2 CU) | RDNA 2 | Shared DDR5 | | Unified memory → near-zero? |
+
+**Analysis to write:**
+
+<!-- After filling data:
+- Does barrier cost scale with cache size or memory bandwidth?
+- Is the iGPU barrier effectively zero (unified memory, no cache flush)?
+- Does HBM2 (Vega FE) show lower barrier latency than GDDR6?
+- Are there any driver-inserted implicit barriers on AMD that don't
+  appear on NVIDIA? (Check RenderDoc event count per GPU.)
+-->
+
+#### Per-Frame Event Count by GPU
+
+| GPU | Total Events | Frame Events | Dispatches | Draw Calls | Barriers | Driver-Inserted Barriers |
+|-----|------------:|-------------:|-----------:|-----------:|---------:|------------------------:|
+| RX 6900 XT | | | 1 | 1 | | |
+| RX 6600 XT | | | 1 | 1 | | |
+| Vega FE | | | 1 | 1 | | |
+| RX 580 | | | 1 | 1 | | |
+| iGPU (2 CU) | | | 1 | 1 | | |
+
+> Compare against NVIDIA RTX 5090 baseline (Section 3): 133 total events,
+> 28 frame events, 1 barrier. Do AMD GPUs produce different event counts
+> due to driver differences (AMDVLK vs RADV vs NVIDIA)?
+>
+> Generated with: `python scripts/rdoc_analyse.py <rdc_files>`
+
+---
+
+### 13i. 3DMark Cross-Validation — AMD GPU Fleet
+
+Cross-validate this benchmark's AMD GPU rankings against 3DMark Time Spy
+(DX12) and Fire Strike (DX11) to confirm the results reflect real-world
+performance scaling.
+
+> Data source: `scripts/3dmark_scores.json`
+> Charts generated with: `python scripts/compare_3dmark.py --save docs/images`
+
+#### Normalised Performance (Baseline: RX 580 = 1.00×)
+
+| GPU | Architecture | This Benchmark | 3DMark Time Spy | 3DMark Fire Strike | Deviation (TS) | Deviation (FS) |
+|-----|-------------|---------------|----------------|-------------------|----------------|----------------|
+| RX 6900 XT | RDNA 2 (80 CU) | | 4.25× | 3.52× | | |
+| RX 6600 XT | RDNA 2 (32 CU) | | 2.09× | 1.87× | | |
+| Vega FE | GCN 5 (64 CU) | | 1.26× | 1.37× | | |
+| **RX 580** | **GCN 4 (36 CU)** | **1.00×** | **1.00×** | **1.00×** | **—** | **—** |
+| iGPU (2 CU) | RDNA 2 | | 0.13× | 0.13× | | |
+| HD 5770 | TeraScale 2 | | N/A | 0.21× | | |
+
+> **Deviation** = `(This Benchmark ratio / 3DMark ratio) − 1`.
+> Positive = our benchmark favours that GPU more; negative = less.
+
+#### Expected Deviations and Why
+
+| GPU | Expected Deviation | Reason |
+|-----|-------------------|--------|
+| RX 6900 XT | Negative (−10–20%) | 80 CU + 512 GB/s benefits complex multi-pass scenes more than a single dispatch |
+| RX 6600 XT | Near zero | Mid-range GPU; balanced for both workload types |
+| Vega FE | Positive (+10–20%?) | HBM2's 483 GB/s bandwidth disproportionately benefits bandwidth-bound compute workloads |
+| iGPU (2 CU) | Near zero | Both benchmarks GPU-limited at 2 CU regardless of workload |
+| HD 5770 | N/A for Time Spy | TeraScale 2 has no DX12; Fire Strike only |
+
+#### Correlation Analysis
+
+<!-- After filling data:
+- Calculate R² of this benchmark's FPS vs 3DMark Time Spy across all AMD GPUs.
+- R² > 0.90 = strong linear correlation, validates the benchmark.
+- Does Vega FE's HBM2 create an outlier? (Higher bandwidth → this benchmark
+  may over-rate Vega FE relative to 3DMark.)
+- Plot: `python scripts/compare_3dmark.py --save docs/images`
+  → `docs/images/3dmark_correlation_amd.png`
+-->
+
+#### This Benchmark vs 3DMark — What They Measure Differently
+
+| | This Benchmark | 3DMark Time Spy | 3DMark Fire Strike |
+|--|---------------|----------------|-------------------|
+| **Workload** | Single compute dispatch + single draw call | Multi-pass rasterisation, tessellation, post-FX | Multi-pass rasterisation, particle physics |
+| **Draw calls / frame** | 1 | Thousands | Thousands |
+| **Bottleneck (fast GPU)** | CPU overhead | GPU (texture, geometry, shading) | GPU (texture, shading) |
+| **Memory access** | Sequential SSBO read/write | Random texture fetches, render targets | Random texture fetches |
+| **Benefits from** | Memory bandwidth, compute scheduler | Shader count, TMUs, ROPs, driver DX12 path | Shader count, TMUs, ROPs, driver DX11 path |
+
+This difference explains why deviations exist — and why both benchmarks are
+needed for a complete GPU performance picture.
+
+---
+
+### 13j. Summary — AMD Generational Findings
+
+| Observation | Explanation |
+|-------------|-------------|
+| <!-- e.g. Per-CU efficiency: RDNA 2 is X× more efficient than GCN 1.0 --> | <!-- why --> |
+| <!-- e.g. RDNA 2 CU scaling is near-linear up to 32 CUs, sub-linear at 80 --> | <!-- bandwidth saturation --> |
+| <!-- e.g. Memory bandwidth predicts FPS with R² = 0.XX --> | <!-- bandwidth-bound workload --> |
+| <!-- e.g. API ranking differs on AMD vs NVIDIA --> | <!-- driver differences --> |
+| <!-- e.g. Vega FE's HBM2 provides X% more FPS than bandwidth ratio predicts --> | <!-- HBM latency advantage --> |
+| <!-- e.g. TeraScale 2 VLIW5 achieves only X% of theoretical per-SP throughput --> | <!-- VLIW utilisation --> |
+
+---
+
+## 14. Summary
 
 | Observation | Explanation |
 |-------------|-------------|

@@ -548,61 +548,14 @@ Every second the application prints averaged timing to stdout:
 ### RenderDoc Frame Capture
 
 The application has built-in [RenderDoc](https://renderdoc.org/) integration
-via the In-Application API. When launched through RenderDoc, it is detected
-automatically — no manual configuration required.
+via the In-Application API (`--capture <seconds>` for auto-capture, or **F12**
+when launched through RenderDoc). The Vulkan backend emits
+`VK_EXT_debug_utils` labels and named objects for readable event inspection.
 
-**Option A — GUI launch:**
-
-1. Open RenderDoc → **Launch Application** tab.
-2. Set the executable to `build\Release\gpu_benchmark.exe`.
-3. Add arguments, e.g. `--backend vulkan --benchmark 200`.
-4. Click **Launch**, then press **F12** during rendering to capture a frame.
-
-**Option B — Command-line launch:**
-
-```powershell
-# Windows — use renderdoccmd to inject and capture
-& "C:\Program Files\RenderDoc\renderdoccmd.exe" capture .\build\Release\gpu_benchmark.exe --backend vulkan --benchmark 200
-```
-
-```bash
-# Linux
-renderdoccmd capture ./build/gpu_benchmark --backend vulkan --benchmark 200
-```
-
-**Option C — Auto-capture at a specific time:**
-
-```powershell
-# Automatically capture at 5 seconds into the run (after warmup) — no F12 needed
-# Must be launched via RenderDoc (GUI or renderdoccmd)
-.\build\Release\gpu_benchmark.exe --backend vulkan --capture 5
-```
-
-When RenderDoc is detected, the console prints:
-
-```
-============================================
-  RenderDoc detected! (API 1.6.0)
-  Press F12 during rendering to capture a frame.
-  Captures are saved to the RenderDoc working directory.
-============================================
-```
-
-The Vulkan backend emits `VK_EXT_debug_utils` labels visible in RenderDoc's
-event browser:
-
-| Label | Colour | Contents |
-|-------|--------|----------|
-| **Particle Compute** | Green | Bind compute pipeline, push constants, dispatch |
-| **SSBO Barrier (Compute → Vertex)** | Yellow | Pipeline barrier: shader write → vertex read |
-| **Particle Render** | Blue | Begin render pass, bind graphics pipeline, draw particles |
-
-Key Vulkan objects are also named (`Particle SSBO`, `Compute Pipeline`,
-`Graphics Pipeline`, `Main Render Pass`) so they appear with readable labels
-in the Resource Inspector.
-
-See [`docs/renderdoc-analysis.md`](docs/renderdoc-analysis.md) for a detailed
-capture walkthrough and analysis template.
+See [`docs/renderdoc-capture-guide.md`](docs/renderdoc-capture-guide.md) for
+step-by-step capture instructions and
+[`docs/renderdoc-analysis.md`](docs/renderdoc-analysis.md) for the analysis
+template.
 
 ### Metal Performance HUD (macOS)
 
