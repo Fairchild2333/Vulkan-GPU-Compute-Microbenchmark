@@ -1,6 +1,6 @@
 # Benchmark Results Comparison
 
-> Generated: 2026-03-23 22:43  
+> Generated: 2026-03-23 23:29  
 > Results: 6 entries
 
 ## Ranked by Average FPS

@@ -1199,3 +1199,48 @@ needed for a complete GPU performance picture.
 | HD 5770 would likely win a gaming benchmark | Traditional rasterisation relies on fixed-function units (TMUs, ROPs) where the HD 5770 has 4–6× more hardware than the iGPU |
 
 These results demonstrate that **API overhead, memory placement, and hardware architecture** all significantly affect GPU compute performance — and that the optimal configuration depends on workload complexity and hardware topology.
+
+---
+
+## 15. OpenGL Compute Shader Performance on AMD GPUs
+
+### Observation
+
+OpenGL compute shader performance on AMD GPUs is significantly lower than Vulkan / DX12 / DX11, with older architectures affected most severely.
+
+| GPU | Architecture | OpenGL Compute ms | Vulkan Compute ms | Ratio |
+|-----|-------------|-------------------|-------------------|-------|
+| RTX 5090 (reference) | Blackwell | 0.019 | 0.019 | 1.0× |
+| Radeon Graphics (iGPU) | RDNA 2 | 1.489 | 0.758 | 2.0× |
+| RX 6900 XT | RDNA 2 | 2.742 | 0.184 | 14.9× |
+| RX 6600 XT | RDNA 2 | 2.719 | 0.240 | 11.3× |
+| Vega Frontier Edition | Vega (GCN 5) | 3.321 | 0.368 | 9.0× |
+| RX 580 | Polaris (GCN 4) | 18.913 | 0.362 | 52.3× |
+
+On NVIDIA, OpenGL and Vulkan compute times are nearly identical. On AMD, OpenGL compute is 9–52× slower depending on architecture generation.
+
+### FPS Impact
+
+| GPU | OpenGL FPS | Vulkan FPS | DX11 FPS |
+|-----|-----------|------------|----------|
+| RX 6900 XT | 229 | 2866 | 4107 |
+| RX 6600 XT | 180 | — | — |
+| RX 580 | 42 | 783 | 755 |
+
+The RX 580's OpenGL score (42 FPS) is lower than the Ryzen 5 7600 CPU-based WARP software renderer running DX11 (44–53 FPS).
+
+### Root Cause Analysis
+
+This is a well-documented AMD Windows OpenGL driver limitation, not a code issue:
+
+- **Same code, different results**: The identical OpenGL compute path achieves 2062 FPS on RTX 5090 (GPU time 0.019 ms), confirming the shader and API usage are correct.
+- **Driver-level fixed overhead**: On AMD discrete GPUs, OpenGL `glDispatchCompute` introduces a fixed overhead of ~2.7 ms (RDNA 2) to ~18.9 ms (GCN 4), independent of GPU compute capability — the RX 6900 XT and RX 6600 XT show nearly identical compute times despite having 80 vs 32 CUs.
+- **Known industry issue**: Multiple major projects have documented AMD's OpenGL performance gap on Windows:
+  - RPCS3 (PS3 emulator) filed [issue #11197 "radeon: Poor state of Windows OpenGL drivers"](https://github.com/RPCS3/rpcs3/issues/11197), describing AMD's OpenGL performance as "disastrous."
+  - PCSX2 (PS2 emulator) documented the problem in their wiki: ["OpenGL and AMD GPUs - All you need to know"](https://github.com/PCSX2/pcsx2/wiki/OpenGL-and-AMD-GPUs---All-you-need-to-know), noting OpenGL runs 10–70% slower compared to Direct3D on AMD GPUs.
+  - AMD acknowledged the issue and [rewrote their OpenGL driver to internally translate calls to Vulkan](https://www.neowin.net/news/amds-windows-11-22h2-wddm-31-driver-finally-fixes-radeons-poor-opengl-performance/) (Adrenalin 22.7.1 / WDDM 3.1), achieving [up to 55% improvement in Unigine Valley and 79% in Minecraft](https://www.neowin.net/news/amd-2271-driver-has-major-opengl-optimizations-and-windows-11-22h2-support/).
+- **GCN/Polaris most affected**: Since Adrenalin 23.9, AMD [moved GCN (Polaris/Vega) to a maintenance-only driver branch](https://it.slashdot.org/story/23/11/09/1820227/amd-begins-polaris-and-vega-gpu-retirement-process-reduces-ongoing-driver-support) with no new performance optimisations. The OpenGL-to-Vulkan translation layer improvements may not have been fully applied to these legacy architectures, explaining the extreme 52× gap on the RX 580.
+
+### Conclusion
+
+These results quantitatively demonstrate that **modern APIs (Vulkan, DX12) are essential for realising the full compute potential of AMD hardware**. The OpenGL compute path carries significant driver overhead on AMD, particularly on legacy architectures, reinforcing the industry trend towards explicit, low-overhead graphics APIs.
