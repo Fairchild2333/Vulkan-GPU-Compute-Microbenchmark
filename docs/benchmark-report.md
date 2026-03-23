@@ -1199,7 +1199,3 @@ needed for a complete GPU performance picture.
 | HD 5770 would likely win a gaming benchmark | Traditional rasterisation relies on fixed-function units (TMUs, ROPs) where the HD 5770 has 4–6× more hardware than the iGPU |
 
 These results demonstrate that **API overhead, memory placement, and hardware architecture** all significantly affect GPU compute performance — and that the optimal configuration depends on workload complexity and hardware topology.
-
----
-
-*This report was produced with the assistance of [Cursor](https://www.cursor.com/) IDE and **Claude Opus 4.6** (Anthropic).*

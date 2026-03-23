@@ -898,6 +898,3 @@ Tasks:
 ---
 
 ## Acknowledgements
-
-This project was developed with the assistance of
-[Cursor](https://www.cursor.com/) IDE and **Claude Opus 4.6** (Anthropic).
