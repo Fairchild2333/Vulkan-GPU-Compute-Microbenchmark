@@ -25,9 +25,11 @@ Makefile
 .claude/
 .cursor/
 
-# RenderDoc captures (large binary files)
-/rdoc_captures/
-/results/
+# RenderDoc captures (large binary files, keep JSON traces)
+/rdoc_captures/*.rdc
+
+# Keep results tracked
+# /results/
 
 # OS files
 .DS_Store

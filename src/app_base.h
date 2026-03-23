@@ -54,6 +54,7 @@ protected:
 
 private:
     void InitRenderDoc();
+    void UpdateRenderDocCapturePath();
     void InitWindow();
     void GenerateInitialParticles();
     void MainLoop();
@@ -63,6 +64,7 @@ private:
     void CleanupWindow();
 
     void* rdocApi_ = nullptr;
+    std::string rdocCaptureDir_;
     bool     rdocCaptureRequested_ = false;
     uint32_t rdocCaptureCount_     = 0;
     std::string lastCapturePath_;

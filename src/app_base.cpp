@@ -183,11 +183,7 @@ void AppBase::InitRenderDoc() {
     std::string capDir = shaderDir_ + "../../rdoc_captures/";
     mkdir(capDir.c_str(), 0755);
 #endif
-    std::string backendTag = GetBackendName();
-    for (auto& ch : backendTag)
-        if (ch == ' ' || ch == '.') ch = '_';
-    std::string pathTemplate = capDir + backendTag;
-    api->SetCaptureFilePathTemplate(pathTemplate.c_str());
+    rdocCaptureDir_ = capDir;
 
     int major = 0, minor = 0, patch = 0;
     api->GetAPIVersion(&major, &minor, &patch);
@@ -211,11 +207,29 @@ std::uint32_t AppBase::GetRenderDocCaptureCount() const {
 
 // -----------------------------------------------------------------------
 
+void AppBase::UpdateRenderDocCapturePath() {
+    if (!rdocApi_) return;
+    auto* api = static_cast<RENDERDOC_API_1_6_0*>(rdocApi_);
+
+    std::string backendTag = GetBackendName();
+    for (auto& ch : backendTag)
+        if (ch == ' ' || ch == '.') ch = '_';
+
+    std::string gpuTag = GetDeviceName();
+    for (auto& ch : gpuTag)
+        if (ch == ' ' || ch == '.' || ch == '(' || ch == ')' || ch == '/') ch = '_';
+    while (!gpuTag.empty() && gpuTag.back() == '_') gpuTag.pop_back();
+
+    std::string pathTemplate = rdocCaptureDir_ + backendTag + "_" + gpuTag;
+    api->SetCaptureFilePathTemplate(pathTemplate.c_str());
+}
+
 void AppBase::Run() {
     InitRenderDoc();
     InitWindow();
     GenerateInitialParticles();
     InitBackend();
+    UpdateRenderDocCapturePath();
     glfwShowWindow(window_);
     MainLoop();
     PrintSummary();
