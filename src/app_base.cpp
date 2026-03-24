@@ -215,7 +215,7 @@ void AppBase::UpdateRenderDocCapturePath() {
     for (auto& ch : backendTag)
         if (ch == ' ' || ch == '.') ch = '_';
 
-    std::string gpuTag = GetDeviceName();
+    std::string gpuTag = config_.gpuDisplayName.empty() ? GetDeviceName() : config_.gpuDisplayName;
     for (auto& ch : gpuTag)
         if (ch == ' ' || ch == '.' || ch == '(' || ch == ')' || ch == '/') ch = '_';
     while (!gpuTag.empty() && gpuTag.back() == '_') gpuTag.pop_back();
@@ -333,7 +333,10 @@ void AppBase::MainLoop() {
             rdoc->EndFrameCapture(nullptr, nullptr);
             ++rdocCaptureCount_;
 
-            uint32_t idx = rdocCaptureCount_ - 1;
+            // Use global capture count (not per-instance) since RenderDoc
+            // accumulates captures across multiple backend runs in one session.
+            uint32_t numCaptures = rdoc->GetNumCaptures();
+            uint32_t idx = (numCaptures > 0) ? numCaptures - 1 : 0;
             char filePath[512] = {};
             uint32_t pathLen = sizeof(filePath);
             uint64_t timestamp = 0;
@@ -565,7 +568,7 @@ BenchmarkResult AppBase::CollectResult() const {
     r.id          = GenerateResultId();
     r.timestamp   = GenerateTimestamp();
     r.graphicsApi    = GetBackendName();
-    r.deviceName     = GetDeviceName();
+    r.deviceName     = config_.gpuDisplayName.empty() ? GetDeviceName() : config_.gpuDisplayName;
     r.driverVersion  = GetDriverVersion();
     r.cpuName        = GetCpuName();
     r.osVersion      = GetOsVersion();

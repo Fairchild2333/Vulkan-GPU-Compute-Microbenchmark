@@ -114,8 +114,8 @@ void DX12Backend::CreateDevice() {
     };
     constexpr int kNumFeatureLevels = _countof(kFeatureLevels);
 
-    // Enumerate adapters, deduplicating by VendorId + DeviceId + SubSysId
-    // so the same physical GPU does not appear multiple times.
+    // Enumerate adapters, deduplicating by LUID so that identical GPUs
+    // with distinct LUIDs are listed separately.
     struct AdapterEntry {
         ComPtr<IDXGIAdapter1> adapter;
         DXGI_ADAPTER_DESC1 desc;
@@ -131,9 +131,8 @@ void DX12Backend::CreateDevice() {
 
             bool duplicate = false;
             for (const auto& existing : uniqueAdapters) {
-                if (existing.desc.VendorId == desc.VendorId &&
-                    existing.desc.DeviceId == desc.DeviceId &&
-                    existing.desc.SubSysId == desc.SubSysId) {
+                if (existing.desc.AdapterLuid.HighPart == desc.AdapterLuid.HighPart &&
+                    existing.desc.AdapterLuid.LowPart  == desc.AdapterLuid.LowPart) {
                     duplicate = true;
                     break;
                 }
@@ -182,7 +181,21 @@ void DX12Backend::CreateDevice() {
     std::uint32_t chosen = 0;
     bool hasChoice = false;
 
-    if (requestedGpuIndex_ >= 0) {
+    // Try LUID-based selection first (reliable across factory instances).
+    if (config_.adapterLuidHigh != 0 || config_.adapterLuidLow != 0) {
+        for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+            const auto& d = uniqueAdapters[i].desc;
+            if (d.AdapterLuid.HighPart == static_cast<LONG>(config_.adapterLuidHigh) &&
+                d.AdapterLuid.LowPart  == static_cast<DWORD>(config_.adapterLuidLow) &&
+                uniqueAdapters[i].featureLevelIdx >= 0) {
+                chosen = i;
+                hasChoice = true;
+                break;
+            }
+        }
+        if (!hasChoice)
+            throw std::runtime_error("Requested GPU (LUID) not found or does not support D3D12");
+    } else if (requestedGpuIndex_ >= 0) {
         auto idx = static_cast<std::uint32_t>(requestedGpuIndex_);
         if (idx >= uniqueAdapters.size() || uniqueAdapters[idx].featureLevelIdx < 0)
             throw std::runtime_error("Requested GPU index " +

@@ -15,7 +15,7 @@ The project implements **five interchangeable graphics API backends**:
 
 | Backend | API | Shader Language | Platforms |
 |---------|-----|----------------|-----------|
-| Vulkan 1.2 | Explicit, low-level | GLSL → SPIR-V | Windows, Linux, macOS (MoltenVK) |
+| Vulkan 1.1+ | Explicit, low-level | GLSL → SPIR-V | Windows, Linux, macOS (MoltenVK) |
 | DirectX 12 | Explicit, low-level | HLSL (SM 5.1) | Windows 10+ |
 | DirectX 11 | Implicit, driver-managed | HLSL (SM 5.0) | Windows 7+ |
 | OpenGL 4.3 | Implicit, driver-managed | GLSL 430 | Windows, Linux |
@@ -1272,3 +1272,37 @@ This benchmark has the opposite profile: **one single `glDispatchCompute` call p
 ### Conclusion
 
 These results quantitatively demonstrate that **modern APIs (Vulkan, DX12) are essential for realising the full compute potential of AMD hardware**. The OpenGL compute path carries significant driver overhead on AMD, particularly on legacy architectures, reinforcing the industry trend towards explicit, low-overhead graphics APIs. Choosing the right API is more impactful than optimising application code when driver-level overhead dominates.
+
+---
+
+## Appendix: Dual Identical GPU Behaviour (Mac Pro 2013 — 2× FirePro D700)
+
+The Mac Pro (Late 2013) contains two identical AMD FirePro D700 GPUs (GCN 1.0, Tahiti XT). Testing under Windows 11 via Boot Camp revealed notable differences in how each graphics API handles multi-GPU selection for identical cards:
+
+### Per-API GPU Addressability
+
+| API | Sees both GPUs? | Can run on GPU #2 independently? |
+|-----|----------------|----------------------------------|
+| Vulkan | Yes (2 `VkPhysicalDevice`) | **Yes** — Task Manager confirms GPU #2 load |
+| DirectX 12 | Yes (2 DXGI adapters, distinct LUIDs) | **No** — driver routes work to GPU #1 |
+| DirectX 11 | Yes (2 DXGI adapters, distinct LUIDs) | **No** — driver routes work to GPU #1 |
+| OpenGL | No (single context, OS-assigned GPU) | No |
+
+### Key Findings
+
+- **DXGI enumerates both D700s with different LUIDs**, and both report DX12 Feature Level 11_1 support. Creating a D3D12/D3D11 device on either adapter succeeds. However, **the AMD driver routes all DX11/DX12 compute and rendering work to GPU #1** regardless of which adapter was selected. Windows Task Manager shows zero utilisation on GPU #2 during DX11/DX12 benchmarks targeting the second adapter.
+
+- **Only Vulkan can genuinely dispatch work to GPU #2.** When the benchmark selects `VkPhysicalDevice[1]`, Task Manager confirms GPU #2 shows compute and 3D load while GPU #1 remains idle (aside from display output).
+
+- **This is an AMD driver limitation, not a DX11/DX12 API limitation.** The DX11/DX12 APIs fully support multi-GPU independent addressing — DXGI enumerates both adapters with distinct LUIDs, and `D3D12CreateDevice` / `D3D11CreateDevice` succeed on both. The API layer does its job correctly. However, the AMD Windows driver internally routes all DX11/DX12 work to the primary GPU regardless of which adapter was selected. AMD's own Vulkan driver on the same hardware correctly dispatches to GPU #2, proving the hardware is capable. The FirePro D700's Windows driver has been EOL since March 2019, so this behaviour is unlikely to ever be fixed. This is also consistent with 3DMark behaviour: 3DMark Time Spy cannot select between identical GPUs on this system either.
+
+- **Performance is near-identical between the two cards** when properly addressed via Vulkan: GPU #1 averages ~554 FPS while GPU #2 averages ~448 FPS. The ~20% gap is likely due to GPU #1 handling display output overhead being offset by its position as the "primary" adapter, or minor thermal/power delivery asymmetry in the Mac Pro chassis.
+
+### Technical Details
+
+The benchmark uses **DXGI adapter LUID** (Locally Unique Identifier) to match GPUs across different DXGI factory instances. This was necessary because:
+1. DXGI `EnumAdapters1` may return different adapter counts or ordering across factory instances (e.g., the DX12 backend's factory only sees one D700 adapter while the detection-phase factory sees both).
+2. The previous approach of deduplicating by `VendorId + DeviceId + SubSysId` incorrectly merged both D700s into a single entry.
+3. Passing a gpus-array index to backends failed because the array could be reordered by Vulkan device insertion, causing index mismatches (e.g., index 1 pointing to Basic Render Driver instead of GPU #2).
+
+The LUID-based selection resolves all three issues — the benchmark now correctly creates a device on the intended DXGI adapter, even though the driver ultimately routes DX11/DX12 work to the primary GPU.

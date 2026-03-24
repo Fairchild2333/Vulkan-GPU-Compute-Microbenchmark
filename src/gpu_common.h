@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 
 namespace gpu_bench {
 
@@ -39,6 +40,11 @@ struct BenchmarkConfig {
     std::uint32_t particleCount      = kParticleCount;
     const char*   difficultyLabel    = "Medium";
     double        captureAtSec       = -1.0;
+    std::string   gpuDisplayName;           // if set, overrides deviceName_ for results/RenderDoc
+    // DXGI adapter LUID for precise GPU selection across factory instances.
+    // When both are 0, backends fall back to index-based selection.
+    std::int64_t  adapterLuidHigh   = 0;
+    std::int64_t  adapterLuidLow    = 0;
 };
 
 }  // namespace gpu_bench

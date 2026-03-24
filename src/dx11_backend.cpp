@@ -119,11 +119,12 @@ void DX11Backend::CreateDeviceAndSwapChain() {
             DXGI_ADAPTER_DESC1 desc{};
             adapter->GetDesc1(&desc);
 
+            // Deduplicate by LUID (not VendorId+DeviceId+SubSysId) so that
+            // identical GPUs with distinct LUIDs are listed separately.
             bool duplicate = false;
             for (const auto& existing : uniqueAdapters) {
-                if (existing.desc.VendorId == desc.VendorId &&
-                    existing.desc.DeviceId == desc.DeviceId &&
-                    existing.desc.SubSysId == desc.SubSysId) {
+                if (existing.desc.AdapterLuid.HighPart == desc.AdapterLuid.HighPart &&
+                    existing.desc.AdapterLuid.LowPart  == desc.AdapterLuid.LowPart) {
                     duplicate = true;
                     break;
                 }
@@ -156,7 +157,21 @@ void DX11Backend::CreateDeviceAndSwapChain() {
             hwIndices.push_back(i);
     }
 
-    if (requestedGpuIndex_ >= 0) {
+    // Try LUID-based selection first (reliable across factory instances).
+    bool luidMatched = false;
+    if (config_.adapterLuidHigh != 0 || config_.adapterLuidLow != 0) {
+        for (std::uint32_t i = 0; i < uniqueAdapters.size(); ++i) {
+            const auto& d = uniqueAdapters[i].desc;
+            if (d.AdapterLuid.HighPart == static_cast<LONG>(config_.adapterLuidHigh) &&
+                d.AdapterLuid.LowPart  == static_cast<DWORD>(config_.adapterLuidLow)) {
+                chosen = i;
+                luidMatched = true;
+                break;
+            }
+        }
+        if (!luidMatched)
+            throw std::runtime_error("Requested GPU (LUID) not found for DX11");
+    } else if (requestedGpuIndex_ >= 0) {
         auto idx = static_cast<std::uint32_t>(requestedGpuIndex_);
         if (idx >= uniqueAdapters.size())
             throw std::runtime_error("Requested GPU index " +

@@ -11,7 +11,7 @@ rendering, with GPU timestamp profiling. Runs on **Windows**, **Linux**, and
 
 | Graphics API | API Level | Platforms | Notes |
 |---------|-----------|-----------|-------|
-| Vulkan  | 1.2       | Windows, Linux, HarmonyOS | Requires Vulkan SDK + ICD driver |
+| Vulkan  | 1.1+       | Windows, Linux, HarmonyOS | Requires Vulkan SDK + ICD driver |
 | DirectX 12 | Feature Level 11_0+ | Windows 10+ | Tries FL 12_1→12_0→11_1→11_0; works on older GPUs too |
 | DirectX 11 | Feature Level 11_0 | Windows 7+  | Simplest, broadest Windows support |
 | OpenGL  | 4.3 Core  | Windows, Linux, macOS (legacy) | Cross-platform fallback; requires `GL_ARB_compute_shader` |
@@ -139,7 +139,13 @@ instead — select the same workloads above.
 > in a regular PowerShell window, you will get:
 >
 > ```
-> cmake : 无法将"cmake"项识别为 cmdlet、函数、脚本文件或可运行程序的名称。
+> cmake : The term 'cmake' is not recognized as the name of a cmdlet, function, script file, or operable program. Check
+the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:1
++ cmake --version
++ ~~~~~
+    + CategoryInfo          : ObjectNotFound: (cmake:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
 > ```
 >
 > To make them available globally, add their directories to your User PATH
@@ -753,12 +759,12 @@ across a range of AMD hardware:
 | GPU | Architecture | CUs / SPs | VRAM | Platform | Notes |
 |-----|-------------|-----------|------|----------|-------|
 | HD 5770 | Evergreen (TeraScale 2, before GCN) | 800 SPs | 1 GB | Windows (DX11) | Legacy DX11-era GPU |
-| **FirePro D700 ×2** | **Tahiti (GCN 1.0)** | **2048 SPs** | **6 GB** | **macOS (Metal)** | **Mac Pro 2013 dual-GPU — each card benchmarked independently** |
+| FirePro D700 | Tahiti (GCN 1.0) | 2048 SPs | 6 GB | Windows | Mac Pro 2013 dual-GPU — each card benchmarked independently |
 | RX 580 | Polaris (GCN 4) | 36 CUs | 8 GB | Windows | Mid-range GCN |
 | Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Windows | Prosumer / compute |
 | RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Windows | Mid-range RDNA 2 |
 | RX 6900 XT | RDNA 2 | 80 CUs | 16 GB | Windows | Flagship RDNA 2 |
-| Ryzen 7 9800X3D iGPU | RDNA 3 | 2 CUs | Shared | Windows | Integrated graphics |
+| Ryzen 7 9800X3D iGPU | RDNA 2 | 2 CUs | Shared | Windows | Integrated graphics |
 | Ryzen 7 9800X3D (WARP) | Software | — | System RAM | Windows | Microsoft WARP software rasteriser on AMD CPU |
 
 > **HD 5770 note:** Evergreen does not support Vulkan. Testing will use the
@@ -770,6 +776,11 @@ across a range of AMD hardware:
 > other is dedicated to compute. Both cards will be benchmarked individually
 > via Metal, and optionally via MoltenVK (Vulkan→Metal) or Boot Camp DX11.
 > This provides the only GCN 1.0 data point in the comparison.
+> Although the D700 can create a DX12 device (Feature Level 11_0), its
+> compute shader performance under DX12 is identical to WARP software
+> rendering (~29 FPS vs ~28 FPS), indicating the driver does not
+> accelerate DX12 compute on GCN 1.0. Vulkan 1.1 and DX11 run on the GPU
+> normally (~570–600 FPS).
 >
 > **WARP note:** The Windows Advanced Rasterization Platform (WARP) is a
 > high-performance software renderer included in DirectX. Running the DX11 /

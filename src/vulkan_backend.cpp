@@ -52,7 +52,7 @@ void VulkanBackend::CreateInstance() {
     appInfo.applicationVersion = VK_MAKE_VERSION(0, 2, 0);
     appInfo.pEngineName        = "NoEngine";
     appInfo.engineVersion      = VK_MAKE_VERSION(0, 1, 0);
-    appInfo.apiVersion         = VK_API_VERSION_1_2;
+    appInfo.apiVersion         = VK_API_VERSION_1_1;
 
     std::uint32_t glfwExtCount = 0;
     const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
@@ -241,17 +241,19 @@ void VulkanBackend::PickPhysicalDevice() {
                        + std::to_string(VK_VERSION_PATCH(dv));
     }
 
-    // Try Vulkan 1.2 driver properties for a more descriptive string.
-    VkPhysicalDeviceDriverProperties driverProps{};
-    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-    VkPhysicalDeviceProperties2 props2{};
-    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    props2.pNext = &driverProps;
-    vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
-    if (driverProps.driverInfo[0] != '\0')
-        driverVersion_ = std::string(driverProps.driverName) + " " + driverProps.driverInfo;
-    else if (driverProps.driverName[0] != '\0')
-        driverVersion_ = std::string(driverProps.driverName) + " " + driverVersion_;
+    // Try Vulkan 1.2 driver properties for a more descriptive string (only if device supports 1.2+).
+    if (props.apiVersion >= VK_API_VERSION_1_2) {
+        VkPhysicalDeviceDriverProperties driverProps{};
+        driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+        VkPhysicalDeviceProperties2 props2{};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &driverProps;
+        vkGetPhysicalDeviceProperties2(physicalDevice_, &props2);
+        if (driverProps.driverInfo[0] != '\0')
+            driverVersion_ = std::string(driverProps.driverName) + " " + driverProps.driverInfo;
+        else if (driverProps.driverName[0] != '\0')
+            driverVersion_ = std::string(driverProps.driverName) + " " + driverVersion_;
+    }
 
     std::cout << "Selected GPU [" << chosen << "]: " << deviceName_
               << "  |  Driver: " << driverVersion_ << std::endl;

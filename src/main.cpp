@@ -96,6 +96,10 @@ struct GpuInfo {
     bool supportsDX11   = true;   // virtually everything supports DX11
     bool supportsMetal  = false;
     bool supportsOpenGL = false;
+    std::int32_t dxgiRawIndex = -1;  // DXGI EnumAdapters1 index (stable across reordering)
+    std::int32_t vkPhysDevIndex = -1; // Vulkan vkEnumeratePhysicalDevices index
+    std::int64_t luidHigh = 0;  // DXGI adapter LUID for cross-factory matching
+    std::int64_t luidLow  = 0;
 };
 
 static bool NameLooksIntegrated(const std::string& name) {
@@ -131,11 +135,11 @@ static std::vector<GpuInfo> ProbeGpus() {
     std::vector<GpuInfo> gpus;
 
 #ifdef _WIN32
-    // --- DXGI enumeration (deduplicated by VendorId + DeviceId + SubSysId) ---
+    // --- DXGI enumeration (allow multiple identical GPUs, deduplicate by LUID) ---
     Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
     if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-        struct DevKey { UINT vendor; UINT device; UINT subSys; };
-        std::vector<DevKey> seen;
+        struct DevLuid { LONG high; DWORD low; };
+        std::vector<DevLuid> seen;
 
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
         for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
@@ -144,14 +148,13 @@ static std::vector<GpuInfo> ProbeGpus() {
 
             bool dup = false;
             for (const auto& s : seen) {
-                if (s.vendor == desc.VendorId &&
-                    s.device == desc.DeviceId &&
-                    s.subSys == desc.SubSysId) {
+                if (s.high == desc.AdapterLuid.HighPart &&
+                    s.low  == desc.AdapterLuid.LowPart) {
                     dup = true; break;
                 }
             }
             if (dup) { adapter.Reset(); continue; }
-            seen.push_back({desc.VendorId, desc.DeviceId, desc.SubSysId});
+            seen.push_back({desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart});
 
             GpuInfo info;
             char name[256]{};
@@ -160,6 +163,9 @@ static std::vector<GpuInfo> ProbeGpus() {
             info.name = name;
             info.isSoftware = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
             info.vramMB = desc.DedicatedVideoMemory / (1024 * 1024);
+            info.dxgiRawIndex = static_cast<std::int32_t>(i);
+            info.luidHigh = desc.AdapterLuid.HighPart;
+            info.luidLow  = desc.AdapterLuid.LowPart;
 
 #ifdef HAVE_DX12
             {
@@ -248,7 +254,7 @@ static std::vector<GpuInfo> ProbeGpus() {
     {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.apiVersion = VK_API_VERSION_1_2;
+        appInfo.apiVersion = VK_API_VERSION_1_1;
 
         VkInstanceCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -261,7 +267,8 @@ static std::vector<GpuInfo> ProbeGpus() {
             std::vector<VkPhysicalDevice> devs(count);
             vkEnumeratePhysicalDevices(inst, &count, devs.data());
 
-            for (const auto& dev : devs) {
+            for (std::uint32_t di = 0; di < devs.size(); ++di) {
+                const auto& dev = devs[di];
                 VkPhysicalDeviceProperties props{};
                 vkGetPhysicalDeviceProperties(dev, &props);
 
@@ -269,15 +276,46 @@ static std::vector<GpuInfo> ProbeGpus() {
                 bool vkIsDiscrete = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
 
                 // Match Vulkan device to an existing DXGI entry by name.
+                // Prefer an unmatched entry first so that duplicate GPUs each get their own match.
                 bool matched = false;
+                auto nameMatches = [&](const GpuInfo& gpu) {
+                    return gpu.name.find(props.deviceName) != std::string::npos ||
+                           std::string(props.deviceName).find(gpu.name) != std::string::npos;
+                };
+                // First pass: match an entry that hasn't been marked yet.
                 for (auto& gpu : gpus) {
-                    if (gpu.name.find(props.deviceName) != std::string::npos ||
-                        std::string(props.deviceName).find(gpu.name) != std::string::npos) {
+                    if (!gpu.supportsVulkan && nameMatches(gpu)) {
                         gpu.supportsVulkan = true;
+                        gpu.vkPhysDevIndex = static_cast<std::int32_t>(di);
                         if (vkIsSoftware) gpu.isSoftware = true;
                         if (vkIsDiscrete) gpu.isDiscrete = true;
                         matched = true;
                         break;
+                    }
+                }
+                // Second pass: all matching entries already marked — this is an
+                // additional GPU with the same name (e.g. dual identical cards).
+                // Create a new entry right after the first match so ordering is logical.
+                if (!matched) {
+                    for (std::size_t gi = 0; gi < gpus.size(); ++gi) {
+                        if (nameMatches(gpus[gi])) {
+                            GpuInfo info;
+                            info.name = gpus[gi].name;  // copy DXGI name so disambiguation matches
+                            info.supportsVulkan = true;
+                            info.isSoftware = vkIsSoftware;
+                            info.isDiscrete = vkIsDiscrete;
+                            info.vramMB = gpus[gi].vramMB;
+                            info.supportsDX12 = gpus[gi].supportsDX12;
+                            info.supportsDX11 = gpus[gi].supportsDX11;
+                            info.supportsOpenGL = gpus[gi].supportsOpenGL;
+                            info.dxgiRawIndex = gpus[gi].dxgiRawIndex;
+                            info.luidHigh = gpus[gi].luidHigh;
+                            info.luidLow  = gpus[gi].luidLow;
+                            info.vkPhysDevIndex = static_cast<std::int32_t>(di);
+                            gpus.insert(gpus.begin() + static_cast<std::ptrdiff_t>(gi) + 1, info);
+                            matched = true;
+                            break;
+                        }
                     }
                 }
                 // Partial match: try matching by a substring of the name.
@@ -391,6 +429,22 @@ static std::vector<GpuInfo> ProbeGpus() {
         glfwTerminate();
     }
 #endif
+
+    // Disambiguate GPUs with identical names by appending #1, #2, etc.
+    for (std::size_t i = 0; i < gpus.size(); ++i) {
+        const std::string original = gpus[i].name;
+        int count = 0;
+        for (std::size_t j = 0; j < gpus.size(); ++j)
+            if (gpus[j].name == original) ++count;
+        if (count > 1) {
+            int idx = 1;
+            for (std::size_t j = 0; j < gpus.size(); ++j) {
+                if (gpus[j].name == original) {
+                    gpus[j].name += " #" + std::to_string(idx++);
+                }
+            }
+        }
+    }
 
     return gpus;
 }
@@ -665,7 +719,7 @@ int main(int argc, char* argv[]) {
 
     std::string recommendedApiLabel;
     if (recommendedApi == "metal")        recommendedApiLabel = "Metal";
-    else if (recommendedApi == "vulkan")  recommendedApiLabel = "Vulkan 1.2";
+    else if (recommendedApi == "vulkan")  recommendedApiLabel = "Vulkan";
     else if (recommendedApi == "dx12")    recommendedApiLabel = "DirectX 12";
     else if (recommendedApi == "dx11")    recommendedApiLabel = "DirectX 11";
     else if (recommendedApi == "opengl")  recommendedApiLabel = "OpenGL 4.3";
@@ -679,32 +733,39 @@ int main(int argc, char* argv[]) {
             std::string  backendId;
             std::string  gpuName;
             std::string  apiLabel;
+            std::int64_t luidHigh = 0;
+            std::int64_t luidLow  = 0;
+        };
+        // Map gpus-array index + backend to the raw index each backend expects.
+        auto rawIdx = [&](std::uint32_t gi, const std::string& bid) -> std::int32_t {
+            const auto& g = gpus[gi];
+            if (g.isSoftware) return -2;
+            if (bid == "vulkan") return g.vkPhysDevIndex;
+            if (bid == "dx11" || bid == "dx12") return g.dxgiRawIndex;
+            return static_cast<std::int32_t>(gi);
         };
         std::vector<RunAllEntry> entries;
         for (std::uint32_t gi = 0; gi < gpus.size(); ++gi) {
             const auto& g = gpus[gi];
-            std::int32_t idx = g.isSoftware
-                ? static_cast<std::int32_t>(-2)
-                : static_cast<std::int32_t>(gi);
 #ifdef HAVE_VULKAN
             if (g.supportsVulkan)
-                entries.push_back({idx, "vulkan", g.name, "Vulkan 1.2"});
+                entries.push_back({rawIdx(gi, "vulkan"), "vulkan", g.name, "Vulkan", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_DX12
             if (g.supportsDX12)
-                entries.push_back({idx, "dx12", g.name, "DirectX 12"});
+                entries.push_back({rawIdx(gi, "dx12"), "dx12", g.name, "DirectX 12", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_DX11
             if (g.supportsDX11)
-                entries.push_back({idx, "dx11", g.name, "DirectX 11"});
+                entries.push_back({rawIdx(gi, "dx11"), "dx11", g.name, "DirectX 11", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_METAL
             if (g.supportsMetal)
-                entries.push_back({idx, "metal", g.name, "Metal"});
+                entries.push_back({rawIdx(gi, "metal"), "metal", g.name, "Metal", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_OPENGL
             if (g.supportsOpenGL)
-                entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+                entries.push_back({rawIdx(gi, "opengl"), "opengl", g.name, "OpenGL 4.3", g.luidHigh, g.luidLow});
 #endif
         }
 
@@ -737,6 +798,9 @@ int main(int argc, char* argv[]) {
         std::uint32_t passed = 0, failed = 0;
         for (std::uint32_t i = 0; i < entries.size(); ++i) {
             const auto& e = entries[i];
+            allCfg.gpuDisplayName = e.gpuName;
+            allCfg.adapterLuidHigh = e.luidHigh;
+            allCfg.adapterLuidLow  = e.luidLow;
             std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
                       << "] " << e.apiLabel << " / " << e.gpuName << " <<<\n";
             try {
@@ -967,6 +1031,8 @@ int main(int argc, char* argv[]) {
                     std::string  backendId;
                     std::string  gpuName;
                     std::string  apiLabel;
+                    std::int64_t luidHigh = 0;
+                    std::int64_t luidLow  = 0;
                 };
 
                 std::int32_t selectedGpuForAll = -1;
@@ -994,32 +1060,35 @@ int main(int argc, char* argv[]) {
                         continue;
 
                     const auto& g = gpus[gi];
-                    std::int32_t idx = g.isSoftware
-                        ? static_cast<std::int32_t>(-2)
-                        : static_cast<std::int32_t>(gi);
+                    auto faRawIdx = [&](const std::string& bid) -> std::int32_t {
+                        if (g.isSoftware) return -2;
+                        if (bid == "vulkan") return g.vkPhysDevIndex;
+                        if (bid == "dx11" || bid == "dx12") return g.dxgiRawIndex;
+                        return static_cast<std::int32_t>(gi);
+                    };
 #ifdef HAVE_METAL
                     if (g.supportsMetal)
-                        entries.push_back({idx, "metal", g.name, "Metal"});
+                        entries.push_back({faRawIdx("metal"), "metal", g.name, "Metal", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_VULKAN
                     if (g.supportsVulkan)
-                        entries.push_back({idx, "vulkan", g.name, "Vulkan 1.2"});
+                        entries.push_back({faRawIdx("vulkan"), "vulkan", g.name, "Vulkan", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_DX12
                     if (g.supportsDX12)
-                        entries.push_back({idx, "dx12", g.name, "DirectX 12"});
+                        entries.push_back({faRawIdx("dx12"), "dx12", g.name, "DirectX 12", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_DX11
                     if (g.supportsDX11)
-                        entries.push_back({idx, "dx11", g.name, "DirectX 11"});
+                        entries.push_back({faRawIdx("dx11"), "dx11", g.name, "DirectX 11", g.luidHigh, g.luidLow});
 #endif
 #ifdef HAVE_OPENGL
                     if (g.supportsOpenGL) {
 #ifdef _WIN32
                         if (gi == 0)
-                            entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+                            entries.push_back({faRawIdx("opengl"), "opengl", g.name, "OpenGL 4.3", g.luidHigh, g.luidLow});
 #else
-                        entries.push_back({idx, "opengl", g.name, "OpenGL 4.3"});
+                        entries.push_back({faRawIdx("opengl"), "opengl", g.name, "OpenGL 4.3", g.luidHigh, g.luidLow});
 #endif
                     }
 #endif
@@ -1063,6 +1132,9 @@ int main(int argc, char* argv[]) {
 
                 for (std::uint32_t i = 0; i < entries.size(); ++i) {
                     const auto& e = entries[i];
+                    faCfg.gpuDisplayName = e.gpuName;
+                    faCfg.adapterLuidHigh = e.luidHigh;
+                    faCfg.adapterLuidLow  = e.luidLow;
                     std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
                               << "] " << e.apiLabel << " / " << e.gpuName
                               << " (15s + RenderDoc @ 5s) <<<\n";
@@ -1275,7 +1347,7 @@ int main(int argc, char* argv[]) {
             for (std::uint32_t i = 0; i < available.size(); ++i) {
                 std::string note;
                 if (available[i].id == "metal")       note = "Metal";
-                else if (available[i].id == "vulkan")  note = "Vulkan 1.2";
+                else if (available[i].id == "vulkan")  note = "Vulkan";
                 else if (available[i].id == "dx12")    note = "DirectX 12";
                 else if (available[i].id == "dx11")    note = "DirectX 11";
                 else if (available[i].id == "opengl")  note = "OpenGL 4.3";
@@ -1362,7 +1434,22 @@ int main(int argc, char* argv[]) {
             benchCfg.difficultyLabel = presets[dchoice].name;
         }
 
-        std::int32_t effectiveGpuIndex = warp ? -2 : gpuIndex;
+        // Map gpus-array index to backend-specific raw index.
+        // DX11/DX12 use the DXGI EnumAdapters1 index; Vulkan uses the
+        // vkEnumeratePhysicalDevices index.  This avoids mismatches when
+        // gpus ordering differs from DXGI ordering (e.g. Vulkan-inserted entries).
+        std::int32_t effectiveGpuIndex = -1;
+        if (warp) {
+            effectiveGpuIndex = -2;
+        } else if (gpuIndex >= 0 && static_cast<std::size_t>(gpuIndex) < gpus.size()) {
+            if (selectedBackend == "vulkan") {
+                effectiveGpuIndex = gpus[gpuIndex].vkPhysDevIndex;
+            } else if (selectedBackend == "dx11" || selectedBackend == "dx12") {
+                effectiveGpuIndex = gpus[gpuIndex].dxgiRawIndex;
+            } else {
+                effectiveGpuIndex = gpuIndex;  // Metal / OpenGL: use as-is
+            }
+        }
 
         if (selectedBackend == "opengl" && gpus.size() > 1) {
 #ifdef __linux__
@@ -1392,6 +1479,13 @@ int main(int argc, char* argv[]) {
                           << std::endl;
             }
 #endif
+        }
+
+        // Set display name and LUID for multi-GPU disambiguation.
+        if (gpuIndex >= 0 && static_cast<std::size_t>(gpuIndex) < gpus.size()) {
+            benchCfg.gpuDisplayName = gpus[gpuIndex].name;
+            benchCfg.adapterLuidHigh = gpus[gpuIndex].luidHigh;
+            benchCfg.adapterLuidLow  = gpus[gpuIndex].luidLow;
         }
 
         // -- Create and run the backend --
