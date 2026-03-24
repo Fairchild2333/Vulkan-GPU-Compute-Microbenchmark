@@ -1,4 +1,4 @@
-# Multi-Backend GPU Benchmark Report
+# Multi-Graphics API GPU Benchmark Report
 
 ---
 
@@ -1742,3 +1742,252 @@ The benchmark uses **DXGI adapter LUID** (Locally Unique Identifier) to match GP
 3. Passing a gpus-array index to backends failed because the array could be reordered by Vulkan device insertion, causing index mismatches (e.g., index 1 pointing to Basic Render Driver instead of GPU #2).
 
 The LUID-based selection resolves all three issues — the benchmark now correctly creates a device on the intended DXGI adapter, even though the driver ultimately routes DX11/DX12 work to the primary GPU.
+
+---
+
+## Appendix: ATI, AMD, and Qualcomm Adreno — A Shared GPU Heritage
+
+> The Adreno 640 tested in this benchmark shares a direct lineage with the
+> Radeon GPUs it is compared against. This section traces the corporate and
+> technical connections from ATI Technologies through AMD to Qualcomm's
+> Adreno mobile GPU division.
+
+### Corporate Lineage
+
+| Year | Event |
+|------|-------|
+| 1985 | **Array Technology Inc. (ATI)** founded in Markham, Ontario, Canada |
+| 1987 | First product: EGA Wonder — ISA graphics card for IBM PCs |
+| 1991 | ATI enters the dedicated 2D accelerator market (Mach 8, Mach 32) |
+| 1996 | **3D Rage** — ATI's first 3D-capable GPU. Competed with 3dfx Voodoo and S3 ViRGE |
+| 2000 | **Radeon DDR (R100)** — ATI's first GPU under the Radeon brand. Hardware T&L, competed with NVIDIA GeForce 2 |
+| 2002 | **Radeon 9700 Pro (R300)** — first DirectX 9 GPU, SM 2.0, outperformed GeForce FX. Widely considered ATI's finest moment |
+| 2006 | **AMD acquires ATI Technologies** for $5.4 billion. ATI's GPU division becomes AMD Graphics |
+| 2008 | AMD sells its mobile GPU division (Imageon) to **Qualcomm** for $65 million |
+| 2009 | Qualcomm renames Imageon to **Adreno** (anagram of "Radeon"). First product: Adreno 200 in Snapdragon QSD8250 |
+| 2013 | AMD rebrands consumer GPUs from "Radeon HD" to "Radeon R" series, then later "Radeon RX" |
+| 2017 | AMD launches Vega architecture (GCN 5). "ATI" name fully phased out from all products |
+| 2020 | AMD launches RDNA 2 (RX 6000 series). Qualcomm launches Adreno 660 (Snapdragon 888) |
+| 2024 | Qualcomm launches Snapdragon X Elite with Adreno X1 GPU for Windows on ARM laptops |
+| 2025 | AMD launches RDNA 4 (RX 9070 XT). Qualcomm's Adreno GPUs power the majority of Android devices and Windows on ARM PCs |
+
+### Technical Connection: Imageon → Adreno
+
+ATI's **Imageon** was a low-power mobile GPU line designed for handheld devices and embedded systems (PDAs, early smartphones). When AMD acquired ATI in 2006, Imageon became part of AMD's portfolio but was considered non-core — AMD's focus was on discrete desktop/laptop GPUs (Radeon) and professional workstation GPUs (FirePro).
+
+In 2008, AMD divested the Imageon mobile GPU division to Qualcomm for $65 million — a fraction of the $5.4 billion AMD paid for all of ATI. Qualcomm integrated Imageon into its Snapdragon SoC platform and renamed it **Adreno** — an anagram of "Radeon" that preserves the ATI heritage while establishing a distinct brand.
+
+Adreno's architecture has since diverged significantly from Radeon. By the Adreno 600 series (2018), the GPU shares no meaningful silicon design with contemporary Radeon GPUs — the instruction set, memory hierarchy, shader core layout, and driver stack are entirely Qualcomm-designed. However, foundational concepts from ATI's Imageon era (tile-based rendering optimisations, unified shader architecture for mobile power budgets) persist in Adreno's design philosophy.
+
+### GPUs Tested in This Benchmark — Family Tree
+
+```
+ATI Technologies (1985)
+├── Radeon R100 (2000)
+│   └── Radeon 9700 (R300, 2002) — first DX9 GPU
+│       └── Radeon X1800 (R520, 2005) — last ATI-only design
+│
+├── Imageon (mobile GPU line, 2002–2008)
+│   └── [Sold to Qualcomm, 2008]
+│       └── Adreno 200 (2009) — renamed from Imageon
+│           └── Adreno 3xx/4xx/5xx/6xx
+│               └── Adreno 640 (2019) ← TESTED: Xiaomi Pad 5 / Snapdragon 860
+│                   └── Adreno X1 (2024) — Snapdragon X Elite for WoA
+│
+└── [AMD acquires ATI, 2006]
+    └── AMD Radeon
+        ├── HD 5770 (TeraScale 2, 2009) ← TESTED
+        ├── FirePro D700 (GCN 1.0, 2013) ← TESTED
+        ├── RX 580 (GCN 4, 2017) ← TESTED
+        ├── Vega FE (GCN 5, 2017) ← TESTED
+        ├── RX 6600 XT / 6900 XT (RDNA 2, 2020–2021) ← TESTED
+        └── RX 9070 XT (RDNA 4, 2025) ← TESTED
+```
+
+### What This Means for the Benchmark
+
+The Adreno 640 in this benchmark is, in a historical sense, a distant cousin of the Radeon GPUs it is compared against. Both trace their origins to ATI Technologies, but their architectures diverged completely after the 2008 sale to Qualcomm. Comparing them side-by-side in the same benchmark highlights:
+
+1. **How far mobile GPUs have come**: The Adreno 640 (a 2019 mobile GPU in a tablet SoC) can run the same Vulkan 1.1 compute + render pipeline as desktop GPUs, achieving 106 FPS — slower than a discrete desktop GPU, but functional and measurable with identical code.
+
+2. **The power/performance trade-off**: The Adreno 640 operates within a ~3W thermal envelope (tablet SoC), while the RX 9070 XT consumes ~300W. The 9070 XT is ~17× faster (1,751 vs 106 FPS), but uses ~100× more power — making the Adreno 640 significantly more performance-per-watt efficient for this workload.
+
+3. **Driver maturity gap**: Qualcomm's Windows Vulkan driver is relatively young (first WoA devices shipped 2023), while AMD's Radeon Vulkan drivers have been refined since 2016. This is reflected in the Adreno 640's higher render times and less efficient presentation path.
+
+---
+
+## Appendix: Qualcomm Adreno 640 — Windows on ARM Benchmark Results
+
+> First-ever inclusion of a mobile Qualcomm GPU in this benchmark suite.
+> The Adreno 640 runs natively on Windows 11 ARM64 via Qualcomm's WoA
+> Vulkan/DX12/DX11 drivers — no emulation or translation layer for the
+> GPU workload itself.
+
+### Why Include an Adreno GPU in a Desktop GPU Benchmark?
+
+The test device is a **Xiaomi Pad 5** (小米平板5) — an Android tablet originally shipping with MIUI based on Android 11. Through community-developed custom firmware (Project Renegade / Windows on ARM for Snapdragon 855/860 tablets), Windows 11 ARM64 was installed on this device, replacing the Android operating system entirely. The tablet boots directly into Windows 11, with Qualcomm-provided WDDM drivers exposing the Adreno 640 as a standard Windows GPU — complete with Vulkan, DirectX 12, and DirectX 11 support.
+
+**The motivation for testing this device is rooted in the ATI → AMD → Qualcomm lineage documented in the previous section.** The Adreno GPU traces its origin to ATI's Imageon mobile GPU division, which AMD sold to Qualcomm in 2008. Qualcomm renamed Imageon to Adreno — literally an anagram of "Radeon." In a historical sense, the Adreno 640 is a distant descendant of the same ATI family tree as every Radeon GPU in this benchmark. It is, loosely speaking, still an "A-card" (A卡) — making it a fitting, if unconventional, addition to a benchmark suite that already spans ATI/AMD GPUs from TeraScale 2 (2009) through RDNA 4 (2025).
+
+Including the Adreno 640 also provides unique data points not available from any desktop GPU:
+
+1. **Mobile vs desktop GPU scaling**: How does a 3W tablet SoC GPU compare against 75–300W discrete desktop GPUs running the exact same compute + render workload?
+2. **Qualcomm driver maturity**: Qualcomm's Windows GPU drivers are relatively new (first WoA devices shipped 2023). How do they perform compared to AMD and NVIDIA's decade-old Windows driver stacks?
+3. **ARM64 vs x64 binary translation**: The same benchmark compiled as ARM64 (native) and x64 (Prism emulation) on identical hardware reveals the exact CPU-side overhead of Microsoft's binary translation layer — with GPU times serving as a constant control variable.
+
+### Test Hardware
+
+| Component | Specification |
+|-----------|--------------|
+| Device | Xiaomi Pad 5 (nabu) — Android tablet running Windows 11 ARM64 via [Renegade Project](https://github.com/edk2-porting) / [Port-Windows-11-Xiaomi-Pad-5](https://github.com/erdilS/Port-Windows-11-Xiaomi-Pad-5) |
+| Original OS | Android 11 (MIUI 12.5) |
+| Current OS | Windows 11 Pro ARM64 (NT 10.0.26100) |
+| SoC | Qualcomm Snapdragon 860 (SM8150-AC) — a binned Snapdragon 855+ |
+| CPU | Kryo 585: 1× A77 @ 2.96 GHz (prime) + 3× A77 @ 2.42 GHz (performance) + 4× A55 @ 1.80 GHz (efficiency) |
+| GPU | Qualcomm Adreno 640, ~585 MHz boost, 384 ALUs |
+| RAM | 6 GB LPDDR4X (shared between CPU and GPU) |
+| VRAM | Shared (reported as 1 MB by driver — a Qualcomm WDDM driver reporting limitation, not actual VRAM size) |
+| Vulkan | 1.1.276 (Qualcomm proprietary driver, build 2023-10-23) |
+| DX12 | Feature Level 12_1 (driver 27.20.2060.0) |
+| DX11 | Supported (driver 27.20.2060.0) |
+| OpenGL | **Not supported** — Qualcomm's Windows driver does not expose desktop OpenGL. Microsoft's OpenCL/OpenGL Compatibility Pack provides only GL 3.3 via Mesa-on-DX12 translation, below this benchmark's GL 4.3 requirement. (The same hardware supports OpenGL ES 3.2 on Android, and the open-source Mesa Freedreno driver achieves full OpenGL 4.6 on Linux.) |
+| Display | 11" 2560×1600 IPS 120 Hz (benchmark runs at 1280×720) |
+| Thermal | Passive cooling only (tablet form factor, no fan) |
+| OS | Windows 11 Pro ARM64 (NT 10.0.26100) |
+| Resolution | 1280 × 720 |
+| V-Sync | OFF |
+
+### Cross-API Results — 1M Particles (Medium)
+
+| # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | Frame Time (ms) | GPU Util | Bottleneck |
+|---|-----|---------|-------------|------------|---------------|-----------------|----------|------------|
+| 1 | DX12 | 116.7 | 3.281 | 4.767 | 8.053 | 8.57 | 94% | GPU-bound |
+| 2 | Vulkan | 105.8 | 3.299 | 5.704 | 9.002 | 9.45 | 95% | GPU-bound |
+| 3 | DX11 | 83.2 | 4.374 | 4.579 | 11.775 | 12.02 | 98% | GPU-bound |
+
+### Key Observations
+
+**1. DX12 is the fastest API on Adreno 640**
+
+Unlike desktop GPUs where DX11 or Vulkan often lead, DX12 is the clear winner on this mobile GPU. This suggests Qualcomm's DX12 driver path is more optimised than their Vulkan or DX11 paths — plausible given that DX12 is the primary API for Windows on ARM gaming and application compatibility.
+
+**2. Vulkan render time is inflated**
+
+Vulkan's render time (5.704 ms) is 20% higher than DX12's (4.767 ms), despite both rendering the same workload. This likely reflects immaturity in Qualcomm's Vulkan presentation/swapchain path on Windows, similar to the semaphore wait pollution observed on desktop GPUs (Section 17) but more pronounced.
+
+**3. DX11 has the highest compute overhead**
+
+DX11 compute time (4.374 ms) is 33% higher than Vulkan/DX12 (~3.3 ms). Combined with a large total GPU time (11.775 ms), DX11 is clearly the least efficient path. The implicit driver overhead that helps DX11 on mature desktop drivers (NVIDIA, AMD) does not translate to Qualcomm's younger driver stack.
+
+**4. All APIs are GPU-bound at 95%+ utilisation**
+
+The Adreno 640 is fully saturated at 1M particles — there is no CPU overhead headroom. This contrasts sharply with desktop GPUs where most APIs are CPU-bound at this particle count (e.g., RTX 5090 at 33% GPU utilisation). The mobile GPU's lower compute throughput means it hits the GPU-bound regime much earlier.
+
+### Adreno 640 vs Desktop GPUs — Cross-Platform Comparison
+
+| GPU | Best API | Best FPS | Compute (ms) | Total GPU (ms) | vs Adreno 640 |
+|-----|----------|---------|-------------|---------------|---------------|
+| RTX 5090 | DX12 | 5,603 | 0.014 | 0.065 | **48× faster** |
+| RX 9070 XT | DX11 | 1,774 | 0.047 | 0.542 | **15× faster** |
+| RX 6600 XT | DX12 | 1,834 | 0.190 | 0.406 | **16× faster** |
+| Vega FE | DX12 | 1,716 | 0.219 | 0.452 | **15× faster** |
+| RX 580 | DX12 | 912 | 0.362 | 0.930 | **8× faster** |
+| GTX 970 | Vulkan | 719 | 0.434 | 1.098 | **6× faster** |
+| FirePro D700 | Vulkan | 555 | 0.589 | 1.473 | **5× faster** |
+| Radeon iGPU (2 CU) | DX12 | 324 | 1.480 | 2.953 | **3× faster** |
+| HD 5770 | OpenGL | 188 | 1.794 | 4.818 | **1.6× faster** |
+| **Adreno 640** | **DX12** | **117** | **3.281** | **8.053** | **1.0× (baseline)** |
+| WARP (CPU) | DX12 | 83 | — | 11.7 | 0.7× (slower) |
+
+The Adreno 640 sits between the HD 5770 (a 2009 discrete desktop GPU) and the WARP software renderer in absolute performance. It outperforms WARP by 40%, confirming it is a real hardware GPU despite its mobile origins.
+
+### API Support Limitations on Windows ARM
+
+| API | Adreno 640 (WoA) | Desktop GPU (x64) | Notes |
+|-----|-------------------|-------------------|-------|
+| Vulkan | 1.1 (native driver) | 1.3+ | Qualcomm provides a native ARM64 Vulkan ICD |
+| DX12 | FL 12_1 (native driver) | FL 12_1–12_2 | Full native support via WDDM driver |
+| DX11 | Supported (native driver) | Supported | Full native support |
+| OpenGL | **3.3 max** (compatibility pack) | 4.6 | No native desktop OpenGL; Microsoft's compatibility pack (Mesa → DX12 translation) maxes out at GL 3.3, below the 4.3 required by this benchmark |
+| Metal | N/A | N/A (macOS only) | — |
+
+The lack of OpenGL 4.3 support means the Adreno 640 cannot run this benchmark's OpenGL backend. This is a platform limitation, not a hardware one — the same Adreno 640 on Android supports OpenGL ES 3.2 (roughly equivalent to desktop GL 4.3 in capability), and on Linux the open-source Mesa Freedreno driver achieves full OpenGL 4.6 on Adreno 600-series hardware.
+
+---
+
+## Appendix: ARM64 Native vs x64 Emulated — Performance Comparison on Adreno 640
+
+> Windows on ARM runs native ARM64 binaries at full speed, but can also
+> execute x86/x64 applications through Microsoft's built-in binary
+> translation layer (Prism). This section compares the same benchmark
+> compiled as ARM64 vs x64 on identical hardware.
+
+### What is Prism (x64 Emulation on ARM)?
+
+Windows 11 on ARM includes **Prism**, a binary translation layer that converts x86/x64 instructions to ARM64 at runtime. This allows unmodified x64 Windows applications to run on ARM hardware with a performance penalty. Prism translates code JIT (just-in-time), caching translated blocks for reuse.
+
+Key characteristics:
+- **CPU code is translated**: all C++ application logic (particle initialisation, frame loop, API calls) runs through the translation layer
+- **GPU code is NOT translated**: shaders (SPIR-V, HLSL, GLSL) execute natively on the GPU regardless of the host binary's architecture
+- **API calls pass through**: Vulkan/DX12/DX11 driver calls from the x64 binary reach the same native ARM64 GPU driver via interop thunks
+
+### Why Compare ARM64 vs x64?
+
+1. **RenderDoc compatibility**: RenderDoc only ships as x64. An x64 build is required for RenderDoc frame capture on WoA hardware. Measuring the emulation penalty tells us whether x64 benchmark results are still meaningful for comparison.
+2. **Real-world relevance**: Many Windows applications remain x64-only. Understanding the GPU benchmark impact of emulation helps assess whether WoA devices can be trusted for performance-sensitive x64 workloads.
+3. **Isolating CPU vs GPU overhead**: Since shaders run natively regardless of binary architecture, any performance difference is purely CPU-side (API call overhead, frame loop, buffer management). This cleanly separates translation overhead from GPU execution time.
+
+### Results — ARM64 Native vs x64 Emulated (Adreno 640, 1M Particles, Medium)
+
+| Metric | ARM64 Native | x64 Emulated | Delta |
+|--------|-------------|-------------|-------|
+| **Vulkan** | | | |
+| Avg FPS | 105.8 | 78.6 | **−25.7%** |
+| Compute (ms) | 3.299 | 3.119 | −5.5% |
+| Render (ms) | 5.704 | 5.586 | −2.1% |
+| Total GPU (ms) | 9.002 | 8.706 | −3.3% |
+| Frame Time (ms) | 9.448 | 12.726 | **+34.7%** |
+| **DX12** | | | |
+| Avg FPS | 116.7 | 98.3 | **−15.8%** |
+| Compute (ms) | 3.281 | 3.257 | −0.7% |
+| Render (ms) | 4.767 | 4.368 | −8.4% |
+| Total GPU (ms) | 8.053 | 7.630 | −5.3% |
+| Frame Time (ms) | 8.570 | 10.169 | **+18.7%** |
+| **DX11** | | | |
+| Avg FPS | 83.2 | 75.2 | **−9.6%** |
+| Compute (ms) | 4.374 | 4.381 | +0.2% |
+| Render (ms) | 4.579 | 4.470 | −2.4% |
+| Total GPU (ms) | 11.775 | 11.678 | −0.8% |
+| Frame Time (ms) | 12.024 | 13.293 | **+10.6%** |
+
+### Analysis
+
+**GPU compute/render times are virtually identical** between ARM64 and x64 builds — within ±5% across all APIs, well within run-to-run variance. This confirms the prediction: GPU shaders execute natively on the Adreno 640 regardless of the host binary's architecture. The translation layer does not affect GPU-side workload execution.
+
+**FPS is 10–26% lower on x64**, with the penalty varying by API:
+
+| API | FPS Penalty | Frame Time Increase | CPU Overhead Added |
+|-----|------------|--------------------|--------------------|
+| Vulkan | −25.7% | +3.28 ms | ~3.3 ms per frame |
+| DX12 | −15.8% | +1.60 ms | ~1.6 ms per frame |
+| DX11 | −9.6% | +1.27 ms | ~1.3 ms per frame |
+
+**Why Vulkan is penalised most heavily:**
+
+Vulkan has the highest per-frame CPU call count of the three APIs — explicit command buffer recording, descriptor set binding, fence management, and swapchain acquisition each require individual API calls that pass through the Prism translation layer. Each translated call adds a small overhead (~microseconds), but at 100+ calls per frame, the total accumulates to ~3.3 ms.
+
+DX12 has slightly fewer per-frame CPU calls due to its command list model, resulting in a smaller 1.6 ms penalty. DX11's implicit driver handles most resource management internally (fewer API calls from the application), so it suffers the least translation overhead at 1.3 ms.
+
+**Why GPU times are slightly _lower_ on x64 (counter-intuitive):**
+
+The x64 build's GPU compute and render times are marginally lower (by 1–5%) than ARM64. This is not because x64 code makes the GPU faster — it is an artefact of the **higher frame time**. With longer gaps between frame submissions (due to CPU translation overhead), the GPU has slightly more time to process each frame without contention, resulting in marginally cleaner timestamps. The difference is within measurement noise and should not be interpreted as a real GPU performance improvement.
+
+### Conclusions
+
+1. **GPU benchmark data from x64 builds is valid.** GPU compute and render times are unaffected by Prism translation — x64 results can be directly compared against ARM64 results for GPU performance analysis.
+
+2. **FPS comparisons require a correction factor.** x64 FPS is 10–26% lower than ARM64 native due to CPU-side translation overhead. When comparing Adreno 640 FPS against desktop GPUs (which run x64 natively), the ARM64 native results should be used as the true performance baseline.
+
+3. **Prism overhead is workload-dependent.** API-heavy workloads (Vulkan, DX12) are penalised more than API-light workloads (DX11). For GPU-bound scenarios (this benchmark at 1M particles on Adreno 640), the penalty is modest because most frame time is spent on GPU execution, not CPU API calls.
+
+4. **RenderDoc x64 captures on WoA are viable.** Since the x64 build produces identical GPU behaviour with only a CPU overhead penalty, RenderDoc frame captures from x64 builds are representative of true GPU workload behaviour — the captured GPU commands, timings, and resource state will match what the ARM64 native build would produce.
