@@ -1,0 +1,443 @@
+{
+  "Adreno640": {
+    "api": {
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 3264,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 30720,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 871803,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 23808,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 162494,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 177740,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 700179,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 5376
+    },
+    "cg": {
+      "CloudGatePerformanceGraphicsScore": 6714,
+      "CloudGatePerformancePhysicsScore": 2486,
+      "CloudGatePerformance3DMarkScore": 4872
+    },
+    "fs": {
+      "firestrikeoverallscorep": 1083,
+      "firestrikephysicsscorep": 3567,
+      "firestrikecombinedscorep": 463,
+      "firestrikegraphicsscorep": 1128
+    },
+    "is": {
+      "IceStormPerformanceGraphicsScore": 33410,
+      "IceStormPerformancePhysicsScore": 11821,
+      "IceStormPerformance3DMarkScore": 23764
+    },
+    "ise": {
+      "IceStormExtremeGraphicsScore": 30686,
+      "IceStormExtreme3DMarkScore": 22632,
+      "IceStormExtremePhysicsScore": 11797
+    },
+    "nr": {
+      "NightRaidPerformanceCPUScore": 3079,
+      "NightRaidPerformance3DMarkScore": 4208,
+      "NightRaidPerformanceGraphicsScore": 4500
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLight3DMarkScore": 336,
+      "SteelNomadVulkanLightGraphicsScore": 336
+    },
+    "ts": {
+      "TimeSpyPerformance3DMarkScore": 289,
+      "TimeSpyPerformanceCPUScore": 1333,
+      "TimeSpyPerformanceGraphicsScore": 254
+    },
+    "wl-dx12": {
+      "WildLifePerformance3DMarkScore": 3415,
+      "WildLifePerformanceGraphicsScore": 3415
+    },
+    "wle-dx12": {
+      "WildLifeExtremeGraphicsScore": 768,
+      "WildLifeExtreme3DMarkScore": 768
+    }
+  },
+  "D700": {
+    "api": {
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 319488,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 38400,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 9464270,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 1033608,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 344064,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 10042058,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 1157031,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 35328
+    },
+    "fs": {
+      "firestrikephysicsscorep": 15935,
+      "firestrikecombinedscorep": 4198,
+      "firestrikeoverallscorep": 11884,
+      "firestrikegraphicsscorep": 14733
+    },
+    "sn-dx12": {
+      "SteelNomadDx123DMarkScore": 583,
+      "SteelNomadDx12GraphicsScore": 583
+    },
+    "snl-dx12": {
+      "SteelNomadDx12Light3DMarkScore": 2213,
+      "SteelNomadDx12LightGraphicsScore": 2213
+    },
+    "ts": {
+      "TimeSpyPerformanceGraphicsScore": 4014,
+      "TimeSpyPerformanceCPUScore": 8322,
+      "TimeSpyPerformance3DMarkScore": 4351
+    },
+    "cg": {
+      "CloudGatePerformancePhysicsScore": 10637,
+      "CloudGatePerformanceGraphicsScore": 86997,
+      "CloudGatePerformance3DMarkScore": 33521
+    },
+    "is": {
+      "IceStormPerformanceGraphicsScore": 176138,
+      "IceStormPerformance3DMarkScore": 102330,
+      "IceStormPerformancePhysicsScore": 41486
+    },
+    "ise": {
+      "IceStormExtreme3DMarkScore": 101518,
+      "IceStormExtremeGraphicsScore": 174186,
+      "IceStormExtremePhysicsScore": 41265
+    },
+    "nr": {
+      "NightRaidPerformanceGraphicsScore": 53197,
+      "NightRaidPerformance3DMarkScore": 27999,
+      "NightRaidPerformanceCPUScore": 7600
+    },
+    "wl-vk": {
+      "WildLifePerformanceGraphicsScore": 15371,
+      "WildLifePerformance3DMarkScore": 15371
+    },
+    "wle-dx12": {
+      "WildLifeExtremeCustom3DMarkScore": 0,
+      "WildLifeExtremeCustomGraphicsScore": 5125
+    },
+    "wle-vk": {
+      "WildLifeExtremeGraphicsScore": 5020,
+      "WildLifeExtreme3DMarkScore": 5020
+    }
+  },
+  "GT120": {
+    "cg": {
+      "CloudGatePerformance3DMarkScore": 4048,
+      "CloudGatePerformancePhysicsScore": 17385,
+      "CloudGatePerformanceGraphicsScore": 3321
+    },
+    "is": {
+      "IceStormPerformanceGraphicsScore": 40051,
+      "IceStormPerformancePhysicsScore": 87724,
+      "IceStormPerformance3DMarkScore": 45552
+    },
+    "ise": {
+      "IceStormExtremePhysicsScore": 87307,
+      "IceStormExtremeGraphicsScore": 23387,
+      "IceStormExtreme3DMarkScore": 27931
+    }
+  },
+  "GTX970": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 364713,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 0,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 98304,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 67584,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 2136586,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 3054592,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 13056,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 0
+    },
+    "cg": {
+      "CloudGatePerformance3DMarkScore": 43551,
+      "CloudGatePerformancePhysicsScore": 17649,
+      "CloudGatePerformanceGraphicsScore": 75003
+    },
+    "fs": {
+      "firestrikephysicsscorep": 27515,
+      "firestrikegraphicsscorep": 11145,
+      "firestrikeoverallscorep": 10330,
+      "firestrikecombinedscorep": 4157
+    },
+    "is": {
+      "IceStormPerformanceGraphicsScore": 433093,
+      "IceStormPerformancePhysicsScore": 89499,
+      "IceStormPerformance3DMarkScore": 233708
+    },
+    "ise": {
+      "IceStormExtreme3DMarkScore": 201310,
+      "IceStormExtremePhysicsScore": 89884,
+      "IceStormExtremeGraphicsScore": 311717
+    },
+    "sn-dx12": {
+      "SteelNomadDx12GraphicsScore": 135,
+      "SteelNomadDx123DMarkScore": 135
+    },
+    "sn-vk": {
+      "SteelNomadVulkan3DMarkScore": 144,
+      "SteelNomadVulkanGraphicsScore": 144
+    },
+    "snl-dx12": {
+      "SteelNomadDx12LightGraphicsScore": 3362,
+      "SteelNomadDx12Light3DMarkScore": 3362
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLight3DMarkScore": 3291,
+      "SteelNomadVulkanLightGraphicsScore": 3291
+    },
+    "ts": {
+      "TimeSpyPerformanceGraphicsScore": 3421,
+      "TimeSpyPerformance3DMarkScore": 3788,
+      "TimeSpyPerformanceCPUScore": 9665
+    }
+  },
+  "HD5770": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 1599215,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 55296,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 55296,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 0,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 1601731,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 0,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 0,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 0
+    },
+    "fs": {
+      "firestrikeoverallscorep": 1581,
+      "firestrikegraphicsscorep": 1520,
+      "firestrikephysicsscorep": 27683,
+      "firestrikecombinedscorep": 749
+    }
+  },
+  "R5 7600": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 110592,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 3047352,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 7143911,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2427058,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 7221743,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 86016,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 245760,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 245760
+    },
+    "fs": {
+      "firestrikecombinedscorep": 797,
+      "firestrikeoverallscorep": 2213,
+      "firestrikephysicsscorep": 27486,
+      "firestrikegraphicsscorep": 2337
+    },
+    "sn-dx12": {
+      "SteelNomadDx12GraphicsScore": 136,
+      "SteelNomadDx123DMarkScore": 136
+    },
+    "sn-vk": {
+      "SteelNomadVulkanGraphicsScore": 148,
+      "SteelNomadVulkan3DMarkScore": 148
+    },
+    "snl-dx12": {
+      "SteelNomadDx12Light3DMarkScore": 632,
+      "SteelNomadDx12LightGraphicsScore": 632
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLightGraphicsScore": 657,
+      "SteelNomadVulkanLight3DMarkScore": 657
+    },
+    "ts": {
+      "TimeSpyPerformanceGraphicsScore": 717,
+      "TimeSpyPerformance3DMarkScore": 831,
+      "TimeSpyPerformanceCPUScore": 9067
+    }
+  },
+  "RX580": {
+    "api": {
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 26918709,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2382285,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 70656,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 2300349,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 82944,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 27665010
+    },
+    "fs": {
+      "firestrikecombinedscorep": 4848,
+      "firestrikeoverallscorep": 13218,
+      "firestrikegraphicsscorep": 15132,
+      "firestrikephysicsscorep": 27472
+    },
+    "sn-dx12": {
+      "SteelNomadDx123DMarkScore": 1011,
+      "SteelNomadDx12GraphicsScore": 1011
+    },
+    "sn-vk": {
+      "SteelNomadVulkanGraphicsScore": 1007,
+      "SteelNomadVulkan3DMarkScore": 1007
+    },
+    "snl-dx12": {
+      "SteelNomadDx12LightGraphicsScore": 4234,
+      "SteelNomadDx12Light3DMarkScore": 4234
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLightGraphicsScore": 4386,
+      "SteelNomadVulkanLight3DMarkScore": 4386
+    },
+    "ts": {
+      "TimeSpyPerformanceGraphicsScore": 4388,
+      "TimeSpyPerformance3DMarkScore": 4790,
+      "TimeSpyPerformanceCPUScore": 9978
+    }
+  },
+  "RX6600XT": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 110592,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 39250815,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2509171,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 3190299,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 86016,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 40323810
+    },
+    "fs": {
+      "firestrikephysicsscorep": 27698,
+      "firestrikegraphicsscorep": 29042,
+      "firestrikecombinedscorep": 13243,
+      "firestrikeoverallscorep": 25778
+    },
+    "sn-dx12": {
+      "SteelNomadDx123DMarkScore": 1789,
+      "SteelNomadDx12GraphicsScore": 1789
+    },
+    "sn-vk": {
+      "SteelNomadVulkan3DMarkScore": 1854,
+      "SteelNomadVulkanGraphicsScore": 1854
+    },
+    "snl-dx12": {
+      "SteelNomadDx12LightGraphicsScore": 8987,
+      "SteelNomadDx12Light3DMarkScore": 8987
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLightGraphicsScore": 9288,
+      "SteelNomadVulkanLight3DMarkScore": 9288
+    },
+    "ts": {
+      "TimeSpyPerformanceCPUScore": 9802,
+      "TimeSpyPerformanceGraphicsScore": 9496,
+      "TimeSpyPerformance3DMarkScore": 9540
+    }
+  },
+  "RX6900XT": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 104448,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 3116435,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 36746583,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2483968,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 40780011,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 82944,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 786432,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 786432
+    },
+    "fs": {
+      "firestrikecombinedscorep": 15540,
+      "firestrikeoverallscorep": 40205,
+      "firestrikephysicsscorep": 27538,
+      "firestrikegraphicsscorep": 57736
+    },
+    "sn-dx12": {
+      "SteelNomadDx12GraphicsScore": 3924,
+      "SteelNomadDx123DMarkScore": 3924
+    },
+    "sn-vk": {
+      "SteelNomadVulkanGraphicsScore": 4167,
+      "SteelNomadVulkan3DMarkScore": 4167
+    },
+    "snl-dx12": {
+      "SteelNomadDx12Light3DMarkScore": 19331,
+      "SteelNomadDx12LightGraphicsScore": 19331
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLightGraphicsScore": 19885,
+      "SteelNomadVulkanLight3DMarkScore": 19885
+    },
+    "ts": {
+      "TimeSpyPerformanceGraphicsScore": 20318,
+      "TimeSpyPerformance3DMarkScore": 17402,
+      "TimeSpyPerformanceCPUScore": 9599
+    }
+  },
+  "RX9070XT": {
+    "api": {
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 39878685,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 82944,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 786432,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2414889,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 25875516,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 110592,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 3051074
+    },
+    "fs": {
+      "firestrikecombinedscorep": 15564,
+      "firestrikegraphicsscorep": 67127,
+      "firestrikephysicsscorep": 26875,
+      "firestrikeoverallscorep": 43141
+    },
+    "sn-dx12": {
+      "SteelNomadDx123DMarkScore": 6884,
+      "SteelNomadDx12GraphicsScore": 6884
+    },
+    "sn-vk": {
+      "SteelNomadVulkanGraphicsScore": 7170,
+      "SteelNomadVulkan3DMarkScore": 7170
+    },
+    "snl-dx12": {
+      "SteelNomadDx12Light3DMarkScore": 25445,
+      "SteelNomadDx12LightGraphicsScore": 25445
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLight3DMarkScore": 26360,
+      "SteelNomadVulkanLightGraphicsScore": 26360
+    },
+    "ts": {
+      "TimeSpyPerformanceCPUScore": 9458,
+      "TimeSpyPerformanceGraphicsScore": 28493,
+      "TimeSpyPerformance3DMarkScore": 21885
+    }
+  },
+  "Vega FE": {
+    "api": {
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerSecond": 2486548,
+      "ApiOverheadTestDX11MultiThreadedDrawCallsPerFrame": 82944,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerSecond": 2215550,
+      "ApiOverheadTestDX12DrawCallsPerSecond": 26569509,
+      "ApiOverheadTestDX12DrawCallsPerFrame": 786432,
+      "ApiOverheadTestDX11SingleThreadedDrawCallsPerFrame": 76800,
+      "ApiOverheadTestVulkanDrawCallsPerSecond": 26058561,
+      "ApiOverheadTestVulkanDrawCallsPerFrame": 786432
+    },
+    "fs": {
+      "firestrikecombinedscorep": 8895,
+      "firestrikegraphicsscorep": 22067,
+      "firestrikeoverallscorep": 19738,
+      "firestrikephysicsscorep": 27605
+    },
+    "sn-dx12": {
+      "SteelNomadDx123DMarkScore": 1572,
+      "SteelNomadDx12GraphicsScore": 1572
+    },
+    "sn-vk": {
+      "SteelNomadVulkan3DMarkScore": 1610,
+      "SteelNomadVulkanGraphicsScore": 1610
+    },
+    "snl-dx12": {
+      "SteelNomadDx12Light3DMarkScore": 7096,
+      "SteelNomadDx12LightGraphicsScore": 7096
+    },
+    "snl-vk": {
+      "SteelNomadVulkanLightGraphicsScore": 7201,
+      "SteelNomadVulkanLight3DMarkScore": 7201
+    },
+    "ts": {
+      "TimeSpyPerformanceCPUScore": 9774,
+      "TimeSpyPerformance3DMarkScore": 7287,
+      "TimeSpyPerformanceGraphicsScore": 6974
+    }
+  }
+}

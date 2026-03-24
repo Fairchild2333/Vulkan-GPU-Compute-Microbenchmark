@@ -345,7 +345,7 @@ After completing the above, update the following files:
 
 1. **`docs/renderdoc-analysis.md`** — fill in the template with screenshots
    and timing data.
-2. **`docs/benchmark-report.md`** — update Section 0 with actual numbers from
+2. **`docs/report.md`** — update Section 0 with actual numbers from
    the timing cross-validation table.
 3. **`README.md`** — no changes needed (already documents RenderDoc support).
 
@@ -364,7 +364,7 @@ After completing the above, update the following files:
 - [ ] Cross-GPU comparison table filled in
 - [ ] Optimisation recommendations written
 - [ ] `docs/renderdoc-analysis.md` updated with all data
-- [ ] `docs/benchmark-report.md` Section 0 timing table filled in
+- [ ] `docs/report.md` Section 0 timing table filled in
 
 ---
 

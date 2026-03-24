@@ -1,0 +1,32 @@
+# Normalize line endings to LF on commit, checkout as OS-native
+* text=auto
+
+# Force LF for source files (consistent across platforms)
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.mm text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.cmake text eol=lf
+*.comp text eol=lf
+*.vert text eol=lf
+*.frag text eol=lf
+*.hlsl text eol=lf
+*.metal text eol=lf
+*.glsl text eol=lf
+*.txt text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+CMakeLists.txt text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.rdc binary
+*.3dmark-result binary
+*.csv text eol=lf

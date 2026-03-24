@@ -1,72 +1,104 @@
 {
   "_comment": [
-    "Fill in your 3DMark scores for each GPU.",
+    "3DMark scores extracted from .3dmark-result files (ZIP → Result.xml).",
     "timeSpy = Time Spy Graphics Score (DX12)",
     "fireStrike = Fire Strike Graphics Score (DX11)",
+    "steelNomad = Steel Nomad Graphics Score (DX12)",
+    "steelNomadLight = Steel Nomad Light Graphics Score (Vulkan, or DX12 fallback)",
     "Set to 0 or null if not available (e.g. HD 5770 cannot run Time Spy).",
-    "The 'name' must match the short GPU name from results.json",
-    "  (e.g. 'RTX 5090', 'RX 6900 XT', 'RX 580', 'iGPU').",
-    "Source: run 3DMark yourself, or use public data from:",
-    "  - https://www.3dmark.com/search",
-    "  - https://www.techpowerup.com/gpu-specs/"
+    "Source: scripts/extract_3dmark.py → 3dmark_extracted.json"
   ],
 
   "baseline": "RX 580",
 
   "gpus": [
     {
-      "name":         "RX 9070 XT",
-      "architecture": "RDNA 4 (32 CU)",
-      "timeSpy":      28493,
-      "fireStrike":   67127
+      "name":            "RX 9070 XT",
+      "architecture":    "RDNA 4 (32 CU)",
+      "timeSpy":         28493,
+      "fireStrike":      67127,
+      "steelNomad":      6884,
+      "steelNomadLight": 26360
     },
     {
-      "name":         "RX 6900 XT",
-      "architecture": "RDNA 2 (80 CU)",
-      "timeSpy":      19550,
-      "fireStrike":   47500
+      "name":            "RX 6900 XT",
+      "architecture":    "RDNA 2 (80 CU)",
+      "timeSpy":         20318,
+      "fireStrike":      57736,
+      "steelNomad":      3924,
+      "steelNomadLight": 19885
     },
     {
-      "name":         "RX 6600 XT",
-      "architecture": "RDNA 2 (32 CU)",
-      "timeSpy":      9600,
-      "fireStrike":   25300
+      "name":            "RX 6600 XT",
+      "architecture":    "RDNA 2 (32 CU)",
+      "timeSpy":         9496,
+      "fireStrike":      29042,
+      "steelNomad":      1789,
+      "steelNomadLight": 9288
     },
     {
-      "name":         "Vega FE",
-      "architecture": "GCN 5 (64 CU)",
-      "timeSpy":      5800,
-      "fireStrike":   18500
+      "name":            "Vega FE",
+      "architecture":    "GCN 5 (64 CU)",
+      "timeSpy":         6974,
+      "fireStrike":      22067,
+      "steelNomad":      1572,
+      "steelNomadLight": 7201
     },
     {
-      "name":         "FirePro D700",
-      "architecture": "GCN 1.0 / Tahiti (2048 SP)",
-      "timeSpy":      0,
-      "fireStrike":   6800
+      "name":            "FirePro D700",
+      "architecture":    "GCN 1.0 / Tahiti (2048 SP)",
+      "timeSpy":         4014,
+      "fireStrike":      14733,
+      "steelNomad":      583,
+      "steelNomadLight": 2213
     },
     {
-      "name":         "RX 580",
-      "architecture": "GCN 4 / Polaris (36 CU)",
-      "timeSpy":      4600,
-      "fireStrike":   13500
+      "name":            "RX 580",
+      "architecture":    "GCN 4 / Polaris (36 CU)",
+      "timeSpy":         4388,
+      "fireStrike":      15132,
+      "steelNomad":      1011,
+      "steelNomadLight": 4386
     },
     {
-      "name":         "iGPU",
-      "architecture": "RDNA 2 (2 CU)",
-      "timeSpy":      600,
-      "fireStrike":   1700
+      "name":            "iGPU",
+      "architecture":    "RDNA 2 (2 CU)",
+      "timeSpy":         717,
+      "fireStrike":      2337,
+      "steelNomad":      136,
+      "steelNomadLight": 657
     },
     {
-      "name":         "HD 5770",
-      "architecture": "TeraScale 2 (10 SP)",
-      "timeSpy":      0,
-      "fireStrike":   2900
+      "name":            "HD 5770",
+      "architecture":    "TeraScale 2 (10 SP)",
+      "timeSpy":         0,
+      "fireStrike":      1520,
+      "steelNomad":      0,
+      "steelNomadLight": 0
     },
     {
-      "name":         "RTX 5090",
-      "architecture": "Blackwell (170 SM)",
-      "timeSpy":      38000,
-      "fireStrike":   85000
+      "name":            "RTX 5090",
+      "architecture":    "Blackwell (170 SM)",
+      "timeSpy":         38000,
+      "fireStrike":      85000,
+      "steelNomad":      0,
+      "steelNomadLight": 0
+    },
+    {
+      "name":            "GTX 970",
+      "architecture":    "Maxwell 2.0 (13 SM)",
+      "timeSpy":         3421,
+      "fireStrike":      11145,
+      "steelNomad":      135,
+      "steelNomadLight": 3291
+    },
+    {
+      "name":            "Adreno 640",
+      "architecture":    "Adreno 6xx",
+      "timeSpy":         254,
+      "fireStrike":      1128,
+      "steelNomad":      0,
+      "steelNomadLight": 336
     }
   ]
 }
