@@ -45,6 +45,7 @@ private:
     static constexpr int kTimestampsPerFrame = 4;
     static constexpr int kTimestampSlotCount = 4;
     std::uint32_t timestampQueries_[kTimestampSlotCount][kTimestampsPerFrame]{};
+    void*  frameFences_[kTimestampSlotCount]{};  // GLsync per slot
     bool   timestampsSupported_ = false;
     int    timestampFrameCount_ = 0;
     int    currentFrame_        = 0;

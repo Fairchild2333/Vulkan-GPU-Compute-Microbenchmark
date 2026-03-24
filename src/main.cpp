@@ -526,6 +526,13 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--host-memory") == 0) {
             benchCfg.hostMemory = true;
+        } else if (std::strcmp(argv[i], "--flights") == 0 && i + 1 < argc) {
+            int n = std::stoi(argv[++i]);
+            if (n < 1) n = 1;
+            if (n > 16) n = 16;
+            benchCfg.framesInFlight = static_cast<std::uint32_t>(n);
+        } else if (std::strcmp(argv[i], "--headless") == 0) {
+            benchCfg.headless = true;
         } else if (std::strcmp(argv[i], "--time") == 0 && i + 1 < argc) {
             benchCfg.maxRunTimeSec = std::stod(argv[++i]);
         } else if (std::strcmp(argv[i], "--no-time-limit") == 0) {
@@ -598,6 +605,8 @@ int main(int argc, char* argv[]) {
                       << "  --warp                               Use WARP software renderer (DX11/DX12 only)\n"
                       << "  --vsync                              Enable vertical sync (default: off)\n"
                       << "  --host-memory                        Keep particle buffer in host-visible RAM (slower on dGPU)\n"
+                      << "  --flights <N>                       Set frames-in-flight count (default: 2, max: 16)\n"
+                      << "  --headless                           Pure compute mode (no window/rendering/present)\n"
                       << "  --particles <count>                 Particle count (skips difficulty menu, rounded to 256)\n"
                       << "  --time <seconds>                    Auto-stop after N seconds (default: 15)\n"
                       << "  --no-time-limit                     Run until window is closed\n"
@@ -877,7 +886,10 @@ int main(int argc, char* argv[]) {
             std::cout << "\n  [4] Delete results\n"
                       << "  [5] Full analysis - one GPU (all APIs + RenderDoc + charts)\n"
                       << "  [6] Full analysis - all GPUs x APIs (+ RenderDoc + charts)\n"
-                      << "  [7] Exit\n"
+                      << "  [7] Flights test  - one GPU (all APIs + RenderDoc, custom flights)\n"
+                      << "  [8] Particle test - one GPU (all APIs + RenderDoc, custom particles)\n"
+                      << "  [9] Headless compute - one GPU (all APIs, pure compute, no rendering)\n"
+                      << "  [10] Exit\n"
                       << "====================================\n"
                       << "Select (default: 0): " << std::flush;
 
@@ -1319,7 +1331,269 @@ int main(int argc, char* argv[]) {
                 directBenchmark = false;
                 continue;
 
-            } else if (mchoice == 7) {
+            } else if (mchoice == 7 || mchoice == 8 || mchoice == 9) {
+                // ---- Options 7/8/9: Flights test / Particle test / Headless compute ----
+                // Similar to option 5 (Full analysis - one GPU) but with specific overrides.
+                struct RunAllEntry {
+                    std::int32_t gpuIdx;
+                    std::string  backendId;
+                    std::string  gpuName;
+                    std::string  apiLabel;
+                    std::int64_t luidHigh = 0;
+                    std::int64_t luidLow  = 0;
+                };
+
+                PrintGpuTable(gpus);
+                std::uint32_t defaultGpu = static_cast<std::uint32_t>(recommendedGpuIdx);
+                std::cout << "Select GPU [0-" << (gpus.size() - 1)
+                          << "] (default: " << defaultGpu << "): " << std::flush;
+                std::string gline;
+                std::uint32_t gchoice = defaultGpu;
+                if (std::getline(std::cin, gline) && !gline.empty()) {
+                    int tmp = 0;
+                    if (SafeStoi(gline, tmp) && tmp >= 0 &&
+                        static_cast<std::uint32_t>(tmp) < gpus.size())
+                        gchoice = static_cast<std::uint32_t>(tmp);
+                }
+                gpu_bench::BenchmarkConfig testCfg;
+                testCfg.particleCount = 1048576;
+                testCfg.difficultyLabel = "Medium";
+                testCfg.particlesOverridden = true;
+                testCfg.vsync = false;
+
+                std::string testLabel;
+                if (mchoice == 7) {
+                    // Flights test: ask for flights count
+                    std::cout << "Enter frames-in-flight count (default: 2): " << std::flush;
+                    std::string fline;
+                    int flights = 2;
+                    if (std::getline(std::cin, fline) && !fline.empty())
+                        SafeStoi(fline, flights);
+                    if (flights < 1) flights = 1;
+                    if (flights > 16) flights = 16;
+                    testCfg.framesInFlight = static_cast<std::uint32_t>(flights);
+                    testCfg.captureAtSec = 5.0;  // RenderDoc capture
+                    testLabel = "Flights=" + std::to_string(flights);
+                } else if (mchoice == 8) {
+                    // Particle count test: ask for particle count
+                    struct Preset { const char* name; std::uint32_t count; };
+                    static const Preset presets[] = {
+                        {"Light",   65536},
+                        {"Medium",  1048576},
+                        {"Heavy",   4194304},
+                        {"Extreme", 16777216},
+                    };
+                    std::cout << "\nParticle count presets:\n";
+                    for (int p = 0; p < 4; ++p) {
+                        std::cout << "  [" << p << "] " << presets[p].name
+                                  << " (" << presets[p].count << ")";
+                        if (p == 1) std::cout << "  <- default";
+                        std::cout << "\n";
+                    }
+                    std::cout << "Select [0-3] or enter custom count (default: 1): " << std::flush;
+                    std::string pline;
+                    std::uint32_t pchoice = 1;
+                    if (std::getline(std::cin, pline) && !pline.empty()) {
+                        int tmp = 0;
+                        if (SafeStoi(pline, tmp)) {
+                            if (tmp >= 0 && tmp <= 3)
+                                pchoice = static_cast<std::uint32_t>(tmp);
+                            else if (tmp > 3) {
+                                // Treat as raw particle count, round to 256
+                                testCfg.particleCount = static_cast<std::uint32_t>((tmp / 256) * 256);
+                                if (testCfg.particleCount == 0) testCfg.particleCount = 256;
+                                testCfg.difficultyLabel = "Custom";
+                                pchoice = 99;  // skip preset
+                            }
+                        }
+                    }
+                    if (pchoice <= 3) {
+                        testCfg.particleCount = presets[pchoice].count;
+                        testCfg.difficultyLabel = presets[pchoice].name;
+                    }
+                    testCfg.captureAtSec = 5.0;  // RenderDoc capture
+                    testLabel = "Particles=" + std::to_string(testCfg.particleCount);
+                } else {
+                    // Headless compute: no rendering, no RenderDoc
+                    testCfg.headless = true;
+                    testCfg.captureAtSec = -1.0;  // no RenderDoc
+                    testLabel = "Headless";
+                }
+
+                // Build entry list for the selected GPU
+                std::vector<RunAllEntry> entries;
+                {
+                    const auto& g = gpus[gchoice];
+                    auto faRawIdx = [&](const std::string& bid) -> std::int32_t {
+                        if (g.isSoftware) return -2;
+                        if (bid == "vulkan") return g.vkPhysDevIndex;
+                        if (bid == "dx11" || bid == "dx12") return g.dxgiRawIndex;
+                        return static_cast<std::int32_t>(gchoice);
+                    };
+#ifdef HAVE_METAL
+                    if (g.supportsMetal)
+                        entries.push_back({faRawIdx("metal"), "metal", g.name, "Metal", g.luidHigh, g.luidLow});
+#endif
+#ifdef HAVE_VULKAN
+                    if (g.supportsVulkan)
+                        entries.push_back({faRawIdx("vulkan"), "vulkan", g.name, "Vulkan", g.luidHigh, g.luidLow});
+#endif
+#ifdef HAVE_DX12
+                    if (g.supportsDX12)
+                        entries.push_back({faRawIdx("dx12"), "dx12", g.name, "DirectX 12", g.luidHigh, g.luidLow});
+#endif
+#ifdef HAVE_DX11
+                    if (g.supportsDX11)
+                        entries.push_back({faRawIdx("dx11"), "dx11", g.name, "DirectX 11", g.luidHigh, g.luidLow});
+#endif
+#ifdef HAVE_OPENGL
+                    if (g.supportsOpenGL) {
+#ifdef _WIN32
+                        if (gchoice == 0)
+                            entries.push_back({faRawIdx("opengl"), "opengl", g.name, "OpenGL 4.3", g.luidHigh, g.luidLow});
+#else
+                        entries.push_back({faRawIdx("opengl"), "opengl", g.name, "OpenGL 4.3", g.luidHigh, g.luidLow});
+#endif
+                    }
+#endif
+                }
+
+                if (entries.empty()) {
+                    std::cout << "No runnable API combinations found.\n";
+                    continue;
+                }
+
+                std::cout << "\n====== " << testLabel << " Test: "
+                          << entries.size() << " benchmark(s) ======\n";
+                for (std::uint32_t i = 0; i < entries.size(); ++i) {
+                    std::cout << "  [" << (i + 1) << "] " << entries[i].apiLabel
+                              << " / " << entries[i].gpuName << "\n";
+                }
+                if (testCfg.captureAtSec > 0.0)
+                    std::cout << "  + RenderDoc capture at 5s mark (if RenderDoc detected)\n";
+                if (testCfg.headless)
+                    std::cout << "  + Pure compute mode (no window/rendering/present)\n";
+                std::cout << "=======================================================\n"
+                          << "Proceed? (Y/n): " << std::flush;
+                std::string confirm;
+                std::getline(std::cin, confirm);
+                if (!confirm.empty() && confirm[0] != 'Y' && confirm[0] != 'y')
+                    continue;
+
+                std::uint32_t passed = 0, failed = 0;
+                std::vector<std::string> rdcFiles;
+
+                for (std::uint32_t i = 0; i < entries.size(); ++i) {
+                    const auto& e = entries[i];
+                    testCfg.gpuDisplayName = e.gpuName;
+                    testCfg.adapterLuidHigh = e.luidHigh;
+                    testCfg.adapterLuidLow  = e.luidLow;
+                    std::cout << "\n>>> [" << (i + 1) << "/" << entries.size()
+                              << "] " << e.apiLabel << " / " << e.gpuName
+                              << " (" << testLabel << ", 15s";
+                    if (testCfg.captureAtSec > 0.0)
+                        std::cout << " + RenderDoc @ 5s";
+                    std::cout << ") <<<\n";
+                    try {
+                        std::unique_ptr<gpu_bench::AppBase> app;
+#ifdef HAVE_VULKAN
+                        if (e.backendId == "vulkan")
+                            app = std::make_unique<gpu_bench::VulkanBackend>(
+                                e.gpuIdx, shaderDir, testCfg);
+#endif
+#ifdef HAVE_DX12
+                        if (e.backendId == "dx12")
+                            app = std::make_unique<gpu_bench::DX12Backend>(
+                                e.gpuIdx, shaderDir, testCfg);
+#endif
+#ifdef HAVE_DX11
+                        if (e.backendId == "dx11")
+                            app = std::make_unique<gpu_bench::DX11Backend>(
+                                e.gpuIdx, shaderDir, testCfg);
+#endif
+#ifdef HAVE_METAL
+                        if (e.backendId == "metal")
+                            app = std::make_unique<gpu_bench::MetalBackend>(
+                                e.gpuIdx, shaderDir, testCfg);
+#endif
+#ifdef HAVE_OPENGL
+                        if (e.backendId == "opengl") {
+#ifdef _WIN32
+                            std::cout << "  NOTE: OpenGL on Windows cannot select GPU "
+                                         "- using system default.\n";
+#endif
+                            app = std::make_unique<gpu_bench::OpenGLBackend>(
+                                e.gpuIdx, shaderDir, testCfg);
+                        }
+#endif
+                        if (!app) {
+                            std::cout << "  SKIPPED (backend not available)\n";
+                            ++failed;
+                            continue;
+                        }
+                        app->Run();
+                        if (!app->GetLastCapturePath().empty())
+                            rdcFiles.push_back(app->GetLastCapturePath());
+                        ++passed;
+                    } catch (const gpu_bench::BackToMenuException&) {
+                        std::cout << "  SKIPPED (user cancelled)\n";
+                        ++failed;
+                    } catch (const std::exception& ex) {
+                        std::cout << "  FAILED: " << ex.what() << "\n";
+                        ++failed;
+                    }
+                }
+
+                std::cout << "\n========== " << testLabel << " Test Complete ==========\n"
+                          << "  Passed: " << passed << " / " << entries.size() << "\n";
+                if (failed > 0)
+                    std::cout << "  Failed/Skipped: " << failed << "\n";
+
+                auto allResults = gpu_bench::LoadResults();
+                if (!allResults.empty())
+                    gpu_bench::PrintComparisonTable(allResults);
+
+                // RenderDoc capture conversion (same as option 5)
+                if (!rdcFiles.empty()) {
+                    std::cout << "\n========== Converting RenderDoc Captures ==========\n";
+                    for (std::uint32_t ci = 0; ci < rdcFiles.size(); ++ci) {
+                        std::string jsonOut = rdcFiles[ci];
+                        auto dotPos = jsonOut.rfind('.');
+                        if (dotPos != std::string::npos)
+                            jsonOut = jsonOut.substr(0, dotPos);
+                        jsonOut += ".json";
+
+#ifdef _WIN32
+                        std::string cmd =
+                            "\"\"C:\\Program Files\\RenderDoc\\renderdoccmd.exe\" convert"
+                            " -f \"" + rdcFiles[ci] + "\""
+                            " -c chrome.json"
+                            " -o \"" + jsonOut + "\"\"";
+#else
+                        std::string cmd = "renderdoccmd convert"
+                            " -f \"" + rdcFiles[ci] + "\""
+                            " -c chrome.json"
+                            " -o \"" + jsonOut + "\"";
+#endif
+                        std::cout << "  [" << (ci + 1) << "/" << rdcFiles.size()
+                                  << "] " << rdcFiles[ci] << "\n";
+                        int rcConv = std::system(cmd.c_str());
+                        if (rcConv != 0)
+                            std::cout << "    WARNING: conversion failed (exit "
+                                      << rcConv << ")\n";
+                        else
+                            std::cout << "    -> " << jsonOut << "\n";
+                    }
+                    std::cout << "====================================================\n";
+                }
+
+                std::cout << "============================================\n";
+
+                hasLastRun = (passed > 0);
+                directBenchmark = false;
+                continue;
+
+            } else if (mchoice == 10) {
                 return 0;
             } else {
                 continue;

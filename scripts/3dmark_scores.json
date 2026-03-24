@@ -15,6 +15,12 @@
 
   "gpus": [
     {
+      "name":         "RX 9070 XT",
+      "architecture": "RDNA 4 (32 CU)",
+      "timeSpy":      28493,
+      "fireStrike":   67127
+    },
+    {
       "name":         "RX 6900 XT",
       "architecture": "RDNA 2 (80 CU)",
       "timeSpy":      19550,

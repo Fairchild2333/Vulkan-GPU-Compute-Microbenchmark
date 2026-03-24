@@ -47,10 +47,12 @@ Microsoft::WRL::ComPtr<ID3DBlob> DX11Backend::CompileShader(const std::string& p
 // -----------------------------------------------------------------------
 
 void DX11Backend::InitBackend() {
-    std::cout << "[DX11 Init] Creating device and swap chain..." << std::endl;
+    std::cout << "[DX11 Init] Creating device" << (config_.headless ? " (headless)..." : " and swap chain...") << std::endl;
     CreateDeviceAndSwapChain();
-    std::cout << "[DX11 Init] Creating render target..." << std::endl;
-    CreateRenderTarget();
+    if (!config_.headless) {
+        std::cout << "[DX11 Init] Creating render target..." << std::endl;
+        CreateRenderTarget();
+    }
     std::cout << "[DX11 Init] Compiling shaders..." << std::endl;
     CreateShaders();
     std::cout << "[DX11 Init] Creating particle buffers..." << std::endl;
@@ -63,7 +65,7 @@ void DX11Backend::InitBackend() {
 }
 
 void DX11Backend::CreateDeviceAndSwapChain() {
-    HWND hwnd = glfwGetWin32Window(window_);
+    HWND hwnd = config_.headless ? nullptr : glfwGetWin32Window(window_);
 
     ComPtr<IDXGIFactory2> factory;
     ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "CreateDXGIFactory1 failed");
@@ -90,19 +92,21 @@ void DX11Backend::CreateDeviceAndSwapChain() {
         driverVersion_ = "WARP";
         std::cout << "Selected GPU: " << deviceName_ << std::endl;
 
-        DXGI_SWAP_CHAIN_DESC1 sd{};
-        sd.Width            = kWindowWidth;
-        sd.Height           = kWindowHeight;
-        sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
-        sd.SampleDesc.Count = 1;
-        sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.BufferCount      = 2;
-        sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-        if (!config_.vsync) sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        if (!config_.headless) {
+            DXGI_SWAP_CHAIN_DESC1 sd{};
+            sd.Width            = kWindowWidth;
+            sd.Height           = kWindowHeight;
+            sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+            sd.SampleDesc.Count = 1;
+            sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            sd.BufferCount      = config_.framesInFlight + 1;
+            sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+            if (!config_.vsync) sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-        ThrowIfFailed(factory->CreateSwapChainForHwnd(
-            device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
-            "CreateSwapChainForHwnd (WARP) failed");
+            ThrowIfFailed(factory->CreateSwapChainForHwnd(
+                device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
+                "CreateSwapChainForHwnd (WARP) failed");
+        }
         return;
     }
 
@@ -283,21 +287,23 @@ void DX11Backend::CreateDeviceAndSwapChain() {
             tearingSupported_ = (allow == TRUE);
     }
 
-    // Create swap chain
-    DXGI_SWAP_CHAIN_DESC1 sd{};
-    sd.Width            = kWindowWidth;
-    sd.Height           = kWindowHeight;
-    sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.SampleDesc.Count = 1;
-    sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.BufferCount      = 2;
-    sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    if (tearingSupported_)
-        sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    // Create swap chain (skip in headless mode)
+    if (!config_.headless) {
+        DXGI_SWAP_CHAIN_DESC1 sd{};
+        sd.Width            = kWindowWidth;
+        sd.Height           = kWindowHeight;
+        sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.SampleDesc.Count = 1;
+        sd.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.BufferCount      = config_.framesInFlight + 1;
+        sd.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        if (tearingSupported_)
+            sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-    ThrowIfFailed(factory->CreateSwapChainForHwnd(
-        device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
-        "CreateSwapChainForHwnd failed");
+        ThrowIfFailed(factory->CreateSwapChainForHwnd(
+            device_.Get(), hwnd, &sd, nullptr, nullptr, &swapChain_),
+            "CreateSwapChainForHwnd failed");
+    }
 }
 
 void DX11Backend::CreateRenderTarget() {
@@ -310,49 +316,51 @@ void DX11Backend::CreateRenderTarget() {
 
 void DX11Backend::CreateShaders() {
     auto csBlob = CompileShader(shaderDir_ + "compute.hlsl",    "CSMain", "cs_5_0");
-    auto vsBlob = CompileShader(shaderDir_ + "particle_vs.hlsl","VSMain", "vs_5_0");
-    auto psBlob = CompileShader(shaderDir_ + "particle_ps.hlsl","PSMain", "ps_5_0");
-
     ThrowIfFailed(device_->CreateComputeShader(
         csBlob->GetBufferPointer(), csBlob->GetBufferSize(), nullptr, &computeShader_),
         "CreateComputeShader failed");
 
-    ThrowIfFailed(device_->CreateVertexShader(
-        vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vertexShader_),
-        "CreateVertexShader failed");
+    if (!config_.headless) {
+        auto vsBlob = CompileShader(shaderDir_ + "particle_vs.hlsl","VSMain", "vs_5_0");
+        auto psBlob = CompileShader(shaderDir_ + "particle_ps.hlsl","PSMain", "ps_5_0");
 
-    ThrowIfFailed(device_->CreatePixelShader(
-        psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &pixelShader_),
-        "CreatePixelShader failed");
+        ThrowIfFailed(device_->CreateVertexShader(
+            vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vertexShader_),
+            "CreateVertexShader failed");
 
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "VELOCITY", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    };
-    ThrowIfFailed(device_->CreateInputLayout(
-        layout, _countof(layout),
-        vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &inputLayout_),
-        "CreateInputLayout failed");
+        ThrowIfFailed(device_->CreatePixelShader(
+            psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &pixelShader_),
+            "CreatePixelShader failed");
 
-    // Blend state (alpha blending)
-    D3D11_BLEND_DESC bd{};
-    bd.RenderTarget[0].BlendEnable           = TRUE;
-    bd.RenderTarget[0].SrcBlend              = D3D11_BLEND_SRC_ALPHA;
-    bd.RenderTarget[0].DestBlend             = D3D11_BLEND_INV_SRC_ALPHA;
-    bd.RenderTarget[0].BlendOp               = D3D11_BLEND_OP_ADD;
-    bd.RenderTarget[0].SrcBlendAlpha         = D3D11_BLEND_ONE;
-    bd.RenderTarget[0].DestBlendAlpha        = D3D11_BLEND_ZERO;
-    bd.RenderTarget[0].BlendOpAlpha          = D3D11_BLEND_OP_ADD;
-    bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    ThrowIfFailed(device_->CreateBlendState(&bd, &blendState_), "CreateBlendState failed");
+        D3D11_INPUT_ELEMENT_DESC layout[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "VELOCITY", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        };
+        ThrowIfFailed(device_->CreateInputLayout(
+            layout, _countof(layout),
+            vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &inputLayout_),
+            "CreateInputLayout failed");
 
-    // Rasterizer state (no culling)
-    D3D11_RASTERIZER_DESC rd{};
-    rd.FillMode = D3D11_FILL_SOLID;
-    rd.CullMode = D3D11_CULL_NONE;
-    rd.DepthClipEnable = TRUE;
-    ThrowIfFailed(device_->CreateRasterizerState(&rd, &rasterizerState_),
-                  "CreateRasterizerState failed");
+        // Blend state (alpha blending)
+        D3D11_BLEND_DESC bd{};
+        bd.RenderTarget[0].BlendEnable           = TRUE;
+        bd.RenderTarget[0].SrcBlend              = D3D11_BLEND_SRC_ALPHA;
+        bd.RenderTarget[0].DestBlend             = D3D11_BLEND_INV_SRC_ALPHA;
+        bd.RenderTarget[0].BlendOp               = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].SrcBlendAlpha         = D3D11_BLEND_ONE;
+        bd.RenderTarget[0].DestBlendAlpha        = D3D11_BLEND_ZERO;
+        bd.RenderTarget[0].BlendOpAlpha          = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        ThrowIfFailed(device_->CreateBlendState(&bd, &blendState_), "CreateBlendState failed");
+
+        // Rasterizer state (no culling)
+        D3D11_RASTERIZER_DESC rd{};
+        rd.FillMode = D3D11_FILL_SOLID;
+        rd.CullMode = D3D11_CULL_NONE;
+        rd.DepthClipEnable = TRUE;
+        ThrowIfFailed(device_->CreateRasterizerState(&rd, &rasterizerState_),
+                      "CreateRasterizerState failed");
+    }
 }
 
 void DX11Backend::CreateParticleBuffers() {
@@ -379,13 +387,15 @@ void DX11Backend::CreateParticleBuffers() {
         computeBuffer_.Get(), &uavDesc, &computeUAV_),
         "CreateUnorderedAccessView failed");
 
-    // Vertex buffer (copy destination each frame)
-    D3D11_BUFFER_DESC vbd{};
-    vbd.ByteWidth = bufSize;
-    vbd.Usage     = D3D11_USAGE_DEFAULT;
-    vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    ThrowIfFailed(device_->CreateBuffer(&vbd, &initData, &vertexBuffer_),
-                  "CreateBuffer (vertex) failed");
+    // Vertex buffer (copy destination each frame) -- not needed in headless
+    if (!config_.headless) {
+        D3D11_BUFFER_DESC vbd{};
+        vbd.ByteWidth = bufSize;
+        vbd.Usage     = D3D11_USAGE_DEFAULT;
+        vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        ThrowIfFailed(device_->CreateBuffer(&vbd, &initData, &vertexBuffer_),
+                      "CreateBuffer (vertex) failed");
+    }
 
     std::cout << "Created particle buffers: " << config_.particleCount << " particles\n";
 }
@@ -435,7 +445,9 @@ void DX11Backend::CollectTimestampResults() {
     HRESULT hr = context_->GetData(disjointQueries_[readSlot].Get(),
                                    &disjoint, sizeof(disjoint), 0);
     for (int retry = 0; retry < 128 && hr == S_FALSE; ++retry) {
-        if (retry % 32 == 31) Sleep(1);
+        // Sleep only in windowed mode; headless uses pure spin-wait
+        // to avoid Windows Sleep() granularity (~4ms) killing FPS.
+        if (!config_.headless && retry % 32 == 31) Sleep(1);
         hr = context_->GetData(disjointQueries_[readSlot].Get(),
                                &disjoint, sizeof(disjoint),
                                D3D11_ASYNC_GETDATA_DONOTFLUSH);
@@ -473,7 +485,7 @@ void DX11Backend::CollectTimestampResults() {
         hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
                                &ts[i], sizeof(UINT64), 0);
         for (int retry = 0; retry < 128 && hr == S_FALSE; ++retry) {
-            if (retry % 32 == 31) Sleep(1);
+            if (!config_.headless && retry % 32 == 31) Sleep(1);
             hr = context_->GetData(timestampQueries_[readSlot][i].Get(),
                                    &ts[i], sizeof(UINT64),
                                    D3D11_ASYNC_GETDATA_DONOTFLUSH);
@@ -482,10 +494,18 @@ void DX11Backend::CollectTimestampResults() {
     }
 
     double toMs = 1000.0 / static_cast<double>(freq);
-    AccumulateTiming(
-        static_cast<double>(ts[1] - ts[0]) * toMs,
-        static_cast<double>(ts[3] - ts[2]) * toMs,
-        static_cast<double>(ts[3] - ts[0]) * toMs);
+    double computeMs = static_cast<double>(ts[1] - ts[0]) * toMs;
+    double renderMs  = static_cast<double>(ts[3] - ts[2]) * toMs;
+    double totalMs   = static_cast<double>(ts[3] - ts[0]) * toMs;
+
+    // Sanity check: discard obviously bogus samples (DX11 headless can
+    // produce garbage when the driver mixes up query data across frames).
+    if (computeMs > 1000.0 || renderMs > 1000.0 || totalMs > 1000.0)
+        return;
+    if (computeMs < 0.0 || renderMs < 0.0 || totalMs < 0.0)
+        return;
+
+    AccumulateTiming(computeMs, renderMs, totalMs);
 }
 
 // -----------------------------------------------------------------------
@@ -526,44 +546,58 @@ void DX11Backend::DrawFrame(float deltaTime) {
     if (timestampsSupported_)
         context_->End(timestampQueries_[slot][1].Get());
 
-    // Copy compute buffer to vertex buffer
-    context_->CopyResource(vertexBuffer_.Get(), computeBuffer_.Get());
+    if (config_.headless) {
+        // Headless: mirror compute timestamps as render timestamps
+        if (timestampsSupported_) {
+            context_->End(timestampQueries_[slot][2].Get());
+            context_->End(timestampQueries_[slot][3].Get());
+        }
+    } else {
+        // Copy compute buffer to vertex buffer
+        context_->CopyResource(vertexBuffer_.Get(), computeBuffer_.Get());
 
-    // --- Graphics pass ---
-    if (timestampsSupported_)
-        context_->End(timestampQueries_[slot][2].Get());
+        // --- Graphics pass ---
+        if (timestampsSupported_)
+            context_->End(timestampQueries_[slot][2].Get());
 
-    const float clearColor[] = { 0.04f, 0.08f, 0.14f, 1.0f };
-    context_->ClearRenderTargetView(rtv_.Get(), clearColor);
-    context_->OMSetRenderTargets(1, rtv_.GetAddressOf(), nullptr);
-    context_->OMSetBlendState(blendState_.Get(), nullptr, 0xFFFFFFFF);
-    context_->RSSetState(rasterizerState_.Get());
+        const float clearColor[] = { 0.04f, 0.08f, 0.14f, 1.0f };
+        context_->ClearRenderTargetView(rtv_.Get(), clearColor);
+        context_->OMSetRenderTargets(1, rtv_.GetAddressOf(), nullptr);
+        context_->OMSetBlendState(blendState_.Get(), nullptr, 0xFFFFFFFF);
+        context_->RSSetState(rasterizerState_.Get());
 
-    D3D11_VIEWPORT vp{ 0, 0, static_cast<float>(kWindowWidth),
-                       static_cast<float>(kWindowHeight), 0.0f, 1.0f };
-    context_->RSSetViewports(1, &vp);
+        D3D11_VIEWPORT vp{ 0, 0, static_cast<float>(kWindowWidth),
+                           static_cast<float>(kWindowHeight), 0.0f, 1.0f };
+        context_->RSSetViewports(1, &vp);
 
-    context_->IASetInputLayout(inputLayout_.Get());
-    UINT stride = sizeof(Particle);
-    UINT offset = 0;
-    context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
-    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+        context_->IASetInputLayout(inputLayout_.Get());
+        UINT stride = sizeof(Particle);
+        UINT offset = 0;
+        context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
+        context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
 
-    context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
-    context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
-    context_->Draw(config_.particleCount, 0);
+        context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
+        context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
+        context_->Draw(config_.particleCount, 0);
 
-    if (timestampsSupported_)
-        context_->End(timestampQueries_[slot][3].Get());
+        if (timestampsSupported_)
+            context_->End(timestampQueries_[slot][3].Get());
+    }
 
     // End timestamp disjoint
     if (timestampsSupported_)
         context_->End(disjointQueries_[slot].Get());
 
-    UINT presentFlags = 0;
-    if (!config_.vsync && tearingSupported_)
-        presentFlags = DXGI_PRESENT_ALLOW_TEARING;
-    swapChain_->Present(config_.vsync ? 1 : 0, presentFlags);
+    if (config_.headless) {
+        // Flush replaces Present() — submits queued GPU commands so
+        // timestamp queries can resolve without stalling in Sleep() retries.
+        context_->Flush();
+    } else {
+        UINT presentFlags = 0;
+        if (!config_.vsync && tearingSupported_)
+            presentFlags = DXGI_PRESENT_ALLOW_TEARING;
+        swapChain_->Present(config_.vsync ? 1 : 0, presentFlags);
+    }
 
     if (timestampsSupported_ && timestampFrameCount_ < kTimestampSlotCount)
         ++timestampFrameCount_;

@@ -33,11 +33,13 @@ struct BenchmarkConfig {
     bool          benchmarkMode      = false;
     bool          hostMemory         = false;
     bool          particlesOverridden = false;
+    bool          headless           = false;    // pure compute, no window/swapchain/present
     double        maxRunTimeSec      = 15.0;
     double        warmupTimeSec      = 2.0;
     std::uint32_t benchFrames        = 2000;
     std::uint32_t warmupFrames       = 100;
     std::uint32_t particleCount      = kParticleCount;
+    std::uint32_t framesInFlight     = kMaxFramesInFlight;  // runtime override
     const char*   difficultyLabel    = "Medium";
     double        captureAtSec       = -1.0;
     std::string   gpuDisplayName;           // if set, overrides deviceName_ for results/RenderDoc

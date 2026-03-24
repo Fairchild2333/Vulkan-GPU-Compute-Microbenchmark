@@ -13,26 +13,31 @@ namespace gpu_bench {
 
 void VulkanBackend::InitBackend() {
     CreateInstance();
-    CreateSurface();
+    if (!config_.headless) CreateSurface();
     PickPhysicalDevice();
     CreateLogicalDevice();
-    CreateSwapChain();
-    CreateImageViews();
-    CreateRenderPass();
-    CreateGraphicsPipeline();
+    if (!config_.headless) {
+        CreateSwapChain();
+        CreateImageViews();
+        CreateRenderPass();
+        CreateGraphicsPipeline();
+    }
     CreateComputeDescriptorSetLayout();
     CreateCommandPool();
     CreateParticleBuffer();
     CreateComputeDescriptorResources();
     CreateComputePipeline();
-    CreateFramebuffers();
-    CreateCommandBuffers();
+    if (!config_.headless) {
+        CreateFramebuffers();
+        CreateCommandBuffers();
+    }
     CreateSyncObjects();
     CreateTimestampQueryPool();
 
     SetObjectName(VK_OBJECT_TYPE_BUFFER,   reinterpret_cast<std::uint64_t>(particleBuffer_),   "Particle SSBO");
     SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(computePipeline_),  "Compute Pipeline");
-    SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(graphicsPipeline_), "Graphics Pipeline");
+    if (!config_.headless)
+        SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(graphicsPipeline_), "Graphics Pipeline");
     SetObjectName(VK_OBJECT_TYPE_RENDER_PASS, reinterpret_cast<std::uint64_t>(renderPass_),    "Main Render Pass");
 }
 
@@ -54,9 +59,12 @@ void VulkanBackend::CreateInstance() {
     appInfo.engineVersion      = VK_MAKE_VERSION(0, 1, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_1;
 
-    std::uint32_t glfwExtCount = 0;
-    const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
-    std::vector<const char*> extensions(glfwExts, glfwExts + glfwExtCount);
+    std::vector<const char*> extensions;
+    if (!config_.headless) {
+        std::uint32_t glfwExtCount = 0;
+        const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
+        extensions.assign(glfwExts, glfwExts + glfwExtCount);
+    }
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     VkInstanceCreateInfo ci{};
@@ -131,9 +139,14 @@ QueueFamilyIndices VulkanBackend::FindQueueFamilies(VkPhysicalDevice device) con
     for (std::uint32_t i = 0; i < count; ++i) {
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) indices.graphicsFamily = i;
         if (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)  indices.computeFamily  = i;
-        VkBool32 present = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &present);
-        if (present) indices.presentFamily = i;
+        if (config_.headless) {
+            // No surface in headless mode; reuse graphics family as present stand-in
+            if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) indices.presentFamily = i;
+        } else {
+            VkBool32 present = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &present);
+            if (present) indices.presentFamily = i;
+        }
         if (indices.IsComplete()) break;
     }
     return indices;
@@ -168,6 +181,10 @@ bool VulkanBackend::CheckDeviceExtensionSupport(VkPhysicalDevice device) const {
 
 bool VulkanBackend::IsDeviceSuitable(VkPhysicalDevice device) const {
     const auto idx = FindQueueFamilies(device);
+    if (config_.headless) {
+        // Only need compute queue for headless
+        return idx.computeFamily.has_value() && idx.graphicsFamily.has_value();
+    }
     if (!idx.IsComplete() || !CheckDeviceExtensionSupport(device)) return false;
     const auto sc = QuerySwapChainSupport(device);
     return !sc.formats.empty() && !sc.presentModes.empty();
@@ -263,9 +280,10 @@ void VulkanBackend::CreateLogicalDevice() {
     const auto indices = FindQueueFamilies(physicalDevice_);
     std::set<std::uint32_t> unique = {
         indices.graphicsFamily.value(),
-        indices.presentFamily.value(),
         indices.computeFamily.value()
     };
+    if (!config_.headless)
+        unique.insert(indices.presentFamily.value());
 
     std::vector<VkDeviceQueueCreateInfo> queueCIs;
     float prio = 1.0f;
@@ -281,21 +299,24 @@ void VulkanBackend::CreateLogicalDevice() {
     VkPhysicalDeviceFeatures supported{};
     vkGetPhysicalDeviceFeatures(physicalDevice_, &supported);
     VkPhysicalDeviceFeatures features{};
-    if (supported.largePoints) features.largePoints = VK_TRUE;
+    if (!config_.headless && supported.largePoints) features.largePoints = VK_TRUE;
 
     VkDeviceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.queueCreateInfoCount    = static_cast<std::uint32_t>(queueCIs.size());
     ci.pQueueCreateInfos       = queueCIs.data();
     ci.pEnabledFeatures        = &features;
-    ci.enabledExtensionCount   = static_cast<std::uint32_t>(std::size(kRequiredDeviceExtensions));
-    ci.ppEnabledExtensionNames = kRequiredDeviceExtensions;
+    if (!config_.headless) {
+        ci.enabledExtensionCount   = static_cast<std::uint32_t>(std::size(kRequiredDeviceExtensions));
+        ci.ppEnabledExtensionNames = kRequiredDeviceExtensions;
+    }
 
     if (vkCreateDevice(physicalDevice_, &ci, nullptr, &device_) != VK_SUCCESS)
         throw std::runtime_error("vkCreateDevice failed");
 
     vkGetDeviceQueue(device_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
-    vkGetDeviceQueue(device_, indices.presentFamily.value(),  0, &presentQueue_);
+    if (!config_.headless)
+        vkGetDeviceQueue(device_, indices.presentFamily.value(),  0, &presentQueue_);
     vkGetDeviceQueue(device_, indices.computeFamily.value(),  0, &computeQueue_);
 }
 
@@ -460,7 +481,10 @@ void VulkanBackend::CreateSwapChain() {
     auto pm  = ChooseSwapPresentMode(sc.presentModes);
     auto ext = ChooseSwapExtent(sc.capabilities);
 
-    std::uint32_t imgCount = sc.capabilities.minImageCount + 1;
+    // Request at least framesInFlight+1 images so the GPU doesn't stall
+    // waiting for the presentation engine to release an image.
+    std::uint32_t imgCount = std::max(sc.capabilities.minImageCount + 1,
+                                      config_.framesInFlight + 1);
     if (sc.capabilities.maxImageCount > 0 && imgCount > sc.capabilities.maxImageCount)
         imgCount = sc.capabilities.maxImageCount;
 
@@ -759,18 +783,30 @@ void VulkanBackend::CreateCommandBuffers() {
 }
 
 void VulkanBackend::CreateSyncObjects() {
+    const auto flights = config_.framesInFlight;
+    imageAvailableSemaphores_.resize(flights, VK_NULL_HANDLE);
+    renderFinishedSemaphores_.resize(flights, VK_NULL_HANDLE);
+    inFlightFences_.resize(flights, VK_NULL_HANDLE);
+
     VkSemaphoreCreateInfo si{}; si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     VkFenceCreateInfo fi{};
     fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (std::uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (vkCreateSemaphore(device_, &si, nullptr, &imageAvailableSemaphores_[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(device_, &si, nullptr, &renderFinishedSemaphores_[i]) != VK_SUCCESS ||
-            vkCreateFence(device_, &fi, nullptr, &inFlightFences_[i]) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create sync objects");
+    for (std::uint32_t i = 0; i < flights; ++i) {
+        if (config_.headless) {
+            // Headless only needs fences, no semaphores
+            if (vkCreateFence(device_, &fi, nullptr, &inFlightFences_[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create fence");
+        } else {
+            if (vkCreateSemaphore(device_, &si, nullptr, &imageAvailableSemaphores_[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device_, &si, nullptr, &renderFinishedSemaphores_[i]) != VK_SUCCESS ||
+                vkCreateFence(device_, &fi, nullptr, &inFlightFences_[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create sync objects");
+        }
     }
-    imagesInFlight_.resize(swapChainImages_.size(), VK_NULL_HANDLE);
+    if (!config_.headless)
+        imagesInFlight_.resize(swapChainImages_.size(), VK_NULL_HANDLE);
 }
 
 void VulkanBackend::CreateTimestampQueryPool() {
@@ -792,7 +828,7 @@ void VulkanBackend::CreateTimestampQueryPool() {
     VkQueryPoolCreateInfo ci{};
     ci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     ci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
-    ci.queryCount = kTimestampsPerFrame * kMaxFramesInFlight;
+    ci.queryCount = kTimestampsPerFrame * config_.framesInFlight;
     if (vkCreateQueryPool(device_, &ci, nullptr, &timestampQueryPool_) != VK_SUCCESS) {
         std::cerr << "[Profiling] Failed to create query pool -- disabled.\n";
         return;
@@ -807,9 +843,9 @@ void VulkanBackend::CollectTimestampResults(std::uint32_t slot) {
     if (!timestampsSupported_) return;
 
     std::uint32_t first = slot * kTimestampsPerFrame;
-    std::array<std::uint64_t, 4> ts{};
-    if (vkGetQueryPoolResults(device_, timestampQueryPool_, first, 4,
-            sizeof(ts), ts.data(), sizeof(std::uint64_t),
+    std::uint64_t ts[kTimestampsPerFrame]{};
+    if (vkGetQueryPoolResults(device_, timestampQueryPool_, first, kTimestampsPerFrame,
+            sizeof(ts), ts, sizeof(std::uint64_t),
             VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
         return;
 
@@ -908,6 +944,69 @@ void VulkanBackend::DrawFrame(float deltaTime) {
     vkWaitForFences(device_, 1, &inFlightFences_[currentFrame_], VK_TRUE, UINT64_MAX);
     CollectTimestampResults(currentFrame_);
 
+    if (config_.headless) {
+        // --- Headless: compute-only path ---
+        vkResetFences(device_, 1, &inFlightFences_[currentFrame_]);
+
+        // Record a compute-only command buffer
+        if (headlessCmdBuffers_.empty()) {
+            headlessCmdBuffers_.resize(config_.framesInFlight);
+            VkCommandBufferAllocateInfo ai{};
+            ai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            ai.commandPool        = commandPool_;
+            ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            ai.commandBufferCount = config_.framesInFlight;
+            if (vkAllocateCommandBuffers(device_, &ai, headlessCmdBuffers_.data()) != VK_SUCCESS)
+                throw std::runtime_error("vkAllocateCommandBuffers (headless) failed");
+        }
+
+        VkCommandBuffer cmd = headlessCmdBuffers_[currentFrame_];
+        vkResetCommandBuffer(cmd, 0);
+
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cmd, &bi);
+
+        const std::uint32_t tsBase = currentFrame_ * kTimestampsPerFrame;
+        if (timestampsSupported_)
+            vkCmdResetQueryPool(cmd, timestampQueryPool_, tsBase, kTimestampsPerFrame);
+        if (timestampsSupported_)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, tsBase);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                computePipelineLayout_, 0, 1, &computeDescriptorSet_, 0, nullptr);
+        ComputeParams params{ deltaTime, 0.9f };
+        vkCmdPushConstants(cmd, computePipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                           sizeof(ComputeParams), &params);
+        vkCmdDispatch(cmd, config_.particleCount / kComputeWorkGroupSize, 1, 1);
+
+        if (timestampsSupported_)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, tsBase + 1);
+
+        // For headless, timestamps 2 and 3 mirror 0 and 1 (no render)
+        if (timestampsSupported_) {
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, tsBase + 2);
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, tsBase + 3);
+        }
+
+        vkEndCommandBuffer(cmd);
+
+        VkSubmitInfo si{};
+        si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers    = &cmd;
+
+        VkResult res = vkQueueSubmit(computeQueue_, 1, &si, inFlightFences_[currentFrame_]);
+        if (res != VK_SUCCESS)
+            throw std::runtime_error("vkQueueSubmit (headless) failed");
+
+        currentFrame_ = (currentFrame_ + 1) % config_.framesInFlight;
+        return;
+    }
+
+    // --- Normal (windowed) path ---
     std::uint32_t imageIndex = 0;
     VkResult res = vkAcquireNextImageKHR(device_, swapChain_, UINT64_MAX,
                                          imageAvailableSemaphores_[currentFrame_],
@@ -950,7 +1049,7 @@ void VulkanBackend::DrawFrame(float deltaTime) {
     pi.pImageIndices      = &imageIndex;
     vkQueuePresentKHR(presentQueue_, &pi);
 
-    currentFrame_ = (currentFrame_ + 1) % kMaxFramesInFlight;
+    currentFrame_ = (currentFrame_ + 1) % config_.framesInFlight;
 }
 
 // -----------------------------------------------------------------------
@@ -968,11 +1067,12 @@ void VulkanBackend::CleanupSwapChain() {
 }
 
 void VulkanBackend::CleanupBackend() {
-    for (std::uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (imageAvailableSemaphores_[i]) vkDestroySemaphore(device_, imageAvailableSemaphores_[i], nullptr);
-        if (renderFinishedSemaphores_[i]) vkDestroySemaphore(device_, renderFinishedSemaphores_[i], nullptr);
-        if (inFlightFences_[i])           vkDestroyFence(device_, inFlightFences_[i], nullptr);
-    }
+    for (auto sem : imageAvailableSemaphores_)
+        if (sem) vkDestroySemaphore(device_, sem, nullptr);
+    for (auto sem : renderFinishedSemaphores_)
+        if (sem) vkDestroySemaphore(device_, sem, nullptr);
+    for (auto fen : inFlightFences_)
+        if (fen) vkDestroyFence(device_, fen, nullptr);
     if (timestampQueryPool_)        { vkDestroyQueryPool(device_, timestampQueryPool_, nullptr); }
     if (commandPool_)               { vkDestroyCommandPool(device_, commandPool_, nullptr); }
     if (particleBuffer_)            { vkDestroyBuffer(device_, particleBuffer_, nullptr); }

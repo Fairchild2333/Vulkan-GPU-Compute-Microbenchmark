@@ -140,12 +140,12 @@ instead — select the same workloads above.
 >
 > ```
 > cmake : The term 'cmake' is not recognized as the name of a cmdlet, function, script file, or operable program. Check
-the spelling of the name, or if a path was included, verify that the path is correct and try again.
-At line:1 char:1
-+ cmake --version
-+ ~~~~~
-    + CategoryInfo          : ObjectNotFound: (cmake:String) [], CommandNotFoundException
-    + FullyQualifiedErrorId : CommandNotFoundException
+> the spelling of the name, or if a path was included, verify that the path is correct and try again.
+> At line:1 char:1
+> + cmake --version
+> + ~~~~~
+>     + CategoryInfo          : ObjectNotFound: (cmake:String) [], CommandNotFoundException
+>     + FullyQualifiedErrorId : CommandNotFoundException
 > ```
 >
 > To make them available globally, add their directories to your User PATH
@@ -498,6 +498,12 @@ performance report for cross-GPU comparison:
 
 # Normal mode with V-Sync enabled (capped to display refresh rate)
 .\build\Release\gpu_benchmark.exe --vsync
+
+# Headless compute (no window, no rendering, pure GPU compute)
+.\build\Release\gpu_benchmark.exe --benchmark --headless
+
+# Custom frames-in-flight (swapchain depth, 1-16)
+.\build\Release\gpu_benchmark.exe --benchmark --flights 3
 ```
 
 ```bash
@@ -607,6 +613,10 @@ Each backend overrides:
 - [x] `VK_EXT_debug_utils` integration — debug labels and object names for RenderDoc
 - [x] RenderDoc In-Application API — auto-detect, F12 capture, `--capture <seconds>` CLI
 - [x] Python benchmark tooling — chart generation, batch runner, markdown/HTML report export
+- [x] Headless compute mode (`--headless`) — pure GPU compute without window/swapchain/rendering
+- [x] Configurable frames-in-flight (`--flights N`) — test swapchain depth impact
+- [x] Configurable particle count — preset sizes (65K–16M) or custom values
+- [x] RX 9070 XT (RDNA 4) benchmarks — cross-API, particle scaling, headless analysis
 
 #### Benchmark Result History
 
@@ -636,7 +646,10 @@ On startup (when no CLI flags are given), the application presents:
   [4] Delete results
   [5] Full analysis — one GPU (all APIs + RenderDoc + charts)
   [6] Full analysis — all GPUs x APIs (+ RenderDoc + charts)
-  [7] Exit
+  [7] Flights test — one GPU (all APIs + RenderDoc, custom flights)
+  [8] Particle count test — one GPU (all APIs + RenderDoc, custom particles)
+  [9] Headless compute — one GPU (all APIs, pure compute, no rendering)
+  [10] Exit
 ====================================
 ```
 
@@ -653,29 +666,41 @@ On startup (when no CLI flags are given), the application presents:
      - Markdown results table → `docs/results-table.md`
      - Standalone HTML report → `docs/report.html`
   5. Prints a final comparison table to the console.
-  
+
   Requires `pip install -r scripts/requirements.txt` for the Python step.
+- **Flights test** [7] — benchmarks with a custom number of frames-in-flight
+  (swapchain images). Tests how swapchain depth affects throughput. RenderDoc
+  capture filenames include the flights count (e.g. `_flights3`).
+- **Particle count test** [8] — benchmarks with a custom particle count
+  (preset sizes from 65K to 16M, or enter any number). Tests GPU scaling
+  behaviour. RenderDoc capture filenames include the particle count.
+- **Headless compute** [9] — pure GPU compute benchmark with no window,
+  swapchain, rendering, or presentation. Eliminates swapchain throttling and
+  semaphore wait pollution, revealing true compute throughput. On the
+  RX 9070 XT, headless mode achieves **21,000+ FPS** across all APIs
+  (vs ~1,750 FPS windowed) — a 12× speedup.
 - After each run the menu reappears — no need to restart the application.
 
 ### In Progress / Planned
 
-#### RX 6900 XT RenderDoc Capture & Cross-GPU Analysis (P0 — next up)
+#### RenderDoc Capture & Cross-GPU Analysis (P0 — next up)
 
-End-to-end RenderDoc profiling on the **RX 6900 XT** (RDNA 2, 80 CU) with
-the AMD iGPU (2 CU) as baseline.
+End-to-end RenderDoc profiling on multiple GPUs: **RX 9070 XT** (RDNA 4, 32 CU),
+**RX 6900 XT** (RDNA 2, 80 CU), and the AMD iGPU (2 CU) as baseline.
 Full step-by-step guide: [`docs/renderdoc-capture-guide.md`](docs/renderdoc-capture-guide.md).
 
-- [ ] Run baseline benchmarks (6900 XT + iGPU, Vulkan + DX11) without RenderDoc.
+- [ ] Run baseline benchmarks (9070 XT + 6900 XT + iGPU, Vulkan + DX11) without RenderDoc.
 - [ ] Capture one Vulkan frame on each GPU via `--capture 5` (at 5s mark).
 - [ ] Take 7 annotated screenshots (event list, compute pipeline, SSBO data,
       graphics pipeline, barrier, render output, per-event timing).
 - [ ] Cross-validate app timestamp queries against RenderDoc GPU timing (< 5 %
       deviation target).
 - [ ] Write cross-GPU comparison (CU scaling, memory bandwidth, barrier cost).
+- [ ] Compare RDNA 4 vs RDNA 2 per-CU efficiency via RenderDoc per-event timing.
 - [ ] Propose optimisations (Vulkan 1.3 barriers, ping-pong buffer, indirect
       dispatch, dynamic point size, host-visible on iGPU).
 - [ ] Fill in [`docs/renderdoc-analysis.md`](docs/renderdoc-analysis.md) and
-      update [`docs/benchmark-report.md`](docs/benchmark-report.md) Section 0.
+      update [`docs/benchmark-report.md`](docs/benchmark-report.md).
 
 Code integration already complete:
 
@@ -753,17 +778,20 @@ Browser-based port of the particle benchmark, inspired by projects such as
 
 #### Cross-Platform & Cross-GPU Performance Comparison
 
-Publish a written analysis document comparing frame rates and GPU timings
-across a range of AMD hardware:
+Written analysis document comparing frame rates and GPU timings across a
+range of AMD and NVIDIA hardware spanning 16 years (2009–2025):
 
 | GPU | Architecture | CUs / SPs | VRAM | Platform | Notes |
 |-----|-------------|-----------|------|----------|-------|
-| HD 5770 | Evergreen (TeraScale 2, before GCN) | 800 SPs | 1 GB | Windows (DX11) | Legacy DX11-era GPU |
-| FirePro D700 | Tahiti (GCN 1.0) | 2048 SPs | 6 GB | Windows | Mac Pro 2013 dual-GPU — each card benchmarked independently |
-| RX 580 | Polaris (GCN 4) | 36 CUs | 8 GB | Windows | Mid-range GCN |
-| Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Windows | Prosumer / compute |
-| RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Windows | Mid-range RDNA 2 |
+| **RTX 5090** | Blackwell (NVIDIA) | 170 SMs | 32 GB GDDR7 | Windows | Current flagship — reference for cross-vendor comparison |
+| **RX 9070 XT** | RDNA 4 (AMD) | 32 CUs | 16 GB GDDR6 | Windows | Latest AMD architecture — fastest per-CU compute tested |
+| GTX 970 | Maxwell (NVIDIA) | 13 SMs | 4 GB GDDR5 | Windows | Older NVIDIA — reveals API ranking reversal vs modern GPUs |
 | RX 6900 XT | RDNA 2 | 80 CUs | 16 GB | Windows | Flagship RDNA 2 |
+| RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Windows | Mid-range RDNA 2 — same CU count as 9070 XT for per-CU comparison |
+| Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Windows | Prosumer / compute |
+| RX 580 | Polaris (GCN 4) | 36 CUs | 8 GB | Windows | Mid-range GCN — baseline for normalised comparisons |
+| FirePro D700 | Tahiti (GCN 1.0) | 2048 SPs | 6 GB | Windows | Mac Pro 2013 dual-GPU — each card benchmarked independently |
+| HD 5770 | Evergreen (TeraScale 2, before GCN) | 800 SPs | 1 GB | Windows (DX11) | Legacy DX11-era GPU |
 | Ryzen 7 9800X3D iGPU | RDNA 2 | 2 CUs | Shared | Windows | Integrated graphics |
 | Ryzen 7 9800X3D (WARP) | Software | — | System RAM | Windows | Microsoft WARP software rasteriser on AMD CPU |
 
@@ -787,14 +815,22 @@ across a range of AMD hardware:
 > DX12 backends on WARP with an AMD CPU provides a pure-software baseline,
 > isolating CPU compute throughput from GPU hardware.
 
-The document will cover:
+The document covers:
 
-- Per-backend (Vulkan / DX11 / DX12 / Metal / WARP) frame-rate comparison at
-  65 536 particles.
-- Scaling behaviour when increasing particle count (64 K → 1 M → 4 M).
+- Per-backend (Vulkan / DX11 / DX12 / Metal / OpenGL / WARP) frame-rate comparison.
+- Scaling behaviour when increasing particle count (65 K → 1 M → 16 M).
 - Compute vs render timing breakdown per GPU (and CPU via WARP).
 - Hardware vs software rendering comparison (discrete GPU vs WARP baseline).
-- Thermal throttling observations during sustained benchmark runs.
+- RX 9070 XT (RDNA 4) vs RX 6600 XT (RDNA 2): **8.2× per-CU compute improvement**
+  at the same 32-CU count, demonstrating generational architectural gains.
+- Headless compute mode: removing swapchain/render/present reveals true compute
+  throughput — RX 9070 XT achieves 21,000+ FPS in headless vs 1,750 windowed.
+- Swapchain semaphore wait pollution analysis — why fast GPUs (9070 XT, RTX 5090)
+  report inflated render timestamps in windowed mode.
+- Cross-validation against 3DMark Time Spy and Fire Strike across all GPUs.
+- OpenGL compute dispatch overhead on AMD GPUs (2.6–48 ms, vs 0.03 ms on Vulkan).
+
+See [`docs/benchmark-report.md`](docs/benchmark-report.md) for the full analysis.
 - Generational progression from TeraScale 2 → GCN 1.0 → GCN 4 → GCN 5 → RDNA 2 → RDNA 3.
 - Mac Pro 2013 dual-GPU analysis: display GPU vs headless GPU performance
   isolation, and macOS Metal vs Boot Camp DX11 cross-platform comparison.
@@ -805,7 +841,7 @@ Sweep `local_size_x` across powers of two (32, 64, 128, 256, 512, 1024) and
 measure the impact on compute dispatch time for each GPU above. Publish
 findings as an analysis document covering:
 
-- Optimal workgroup size per architecture (GCN vs RDNA 2 vs RDNA 3).
+- Optimal workgroup size per architecture (GCN vs RDNA 2 vs RDNA 4 vs Maxwell vs Blackwell).
 - Occupancy and wavefront utilisation implications.
 - Correlation with CU count and cache hierarchy.
 

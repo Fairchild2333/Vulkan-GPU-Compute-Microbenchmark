@@ -151,6 +151,8 @@ static std::string ResultToJson(const BenchmarkResult& r, int indent = 4) {
     str("difficulty",  r.difficulty);
     bl ("vsync",       r.vsync);
     bl ("isSoftware",  r.isSoftware);
+    bl ("headless",    r.headless);
+    u32("framesInFlight", r.framesInFlight);
 
     dbl("durationSec",    r.durationSec, 1);
     dbl("warmupSec",      r.warmupSec, 1);
@@ -232,6 +234,9 @@ static BenchmarkResult JsonToResult(const std::string& json) {
     r.difficulty    = findStr("difficulty");
     r.vsync         = findBool("vsync");
     r.isSoftware    = findBool("isSoftware");
+    r.headless      = findBool("headless");
+    r.framesInFlight = static_cast<std::uint32_t>(findNum("framesInFlight"));
+    if (r.framesInFlight == 0) r.framesInFlight = 2;  // default for old results
 
     r.durationSec    = findNum("durationSec");
     r.warmupSec      = findNum("warmupSec");

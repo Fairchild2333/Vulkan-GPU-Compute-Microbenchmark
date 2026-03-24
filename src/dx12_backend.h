@@ -49,8 +49,8 @@ private:
     std::string deviceName_;
     std::string driverVersion_;
 
-    static constexpr UINT kFrameCount = kMaxFramesInFlight;
     static constexpr UINT kTimestampsPerFrame = 4;
+    UINT frameCount_ = kMaxFramesInFlight;
 
     ComPtr<IDXGIFactory4>           factory_;
     ComPtr<ID3D12Device>            device_;
@@ -59,11 +59,11 @@ private:
 
     ComPtr<ID3D12DescriptorHeap>    rtvHeap_;
     UINT                            rtvDescriptorSize_ = 0;
-    ComPtr<ID3D12Resource>          renderTargets_[kFrameCount];
+    std::vector<ComPtr<ID3D12Resource>> renderTargets_;
 
     ComPtr<ID3D12DescriptorHeap>    cbvSrvUavHeap_;
 
-    ComPtr<ID3D12CommandAllocator>  commandAllocators_[kFrameCount];
+    std::vector<ComPtr<ID3D12CommandAllocator>> commandAllocators_;
     ComPtr<ID3D12GraphicsCommandList> commandList_;
 
     ComPtr<ID3D12RootSignature>     computeRootSig_;
@@ -83,7 +83,7 @@ private:
     ComPtr<ID3D12Fence>             fence_;
     HANDLE                          fenceEvent_ = nullptr;
     UINT64                          nextFenceValue_ = 1;
-    UINT64                          frameFenceValues_[kFrameCount]{};
+    std::vector<UINT64>             frameFenceValues_;
     UINT                            frameIndex_ = 0;
     bool                            tearingSupported_ = false;
 };

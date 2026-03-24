@@ -9,7 +9,6 @@
 #endif
 #include <GLFW/glfw3.h>
 
-#include <array>
 #include <optional>
 
 namespace gpu_bench {
@@ -80,10 +79,11 @@ private:
 
     VkCommandPool              commandPool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers_;
+    std::vector<VkCommandBuffer> headlessCmdBuffers_;
 
-    std::array<VkSemaphore, kMaxFramesInFlight> imageAvailableSemaphores_{};
-    std::array<VkSemaphore, kMaxFramesInFlight> renderFinishedSemaphores_{};
-    std::array<VkFence,     kMaxFramesInFlight> inFlightFences_{};
+    std::vector<VkSemaphore> imageAvailableSemaphores_;
+    std::vector<VkSemaphore> renderFinishedSemaphores_;
+    std::vector<VkFence>     inFlightFences_;
     std::vector<VkFence>                        imagesInFlight_;
     std::uint32_t currentFrame_ = 0;
 

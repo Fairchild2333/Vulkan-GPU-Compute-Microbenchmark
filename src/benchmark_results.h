@@ -22,6 +22,8 @@ struct BenchmarkResult {
     std::string difficulty;
     bool vsync      = false;
     bool isSoftware = false;
+    bool headless   = false;
+    std::uint32_t framesInFlight = 2;
 
     double durationSec   = 0.0;
     double warmupSec     = 0.0;

@@ -60,16 +60,25 @@ Microsoft::WRL::ComPtr<ID3DBlob> DX12Backend::CompileShader(const std::string& p
 // -----------------------------------------------------------------------
 
 void DX12Backend::InitBackend() {
+    frameCount_ = config_.framesInFlight;
+    frameFenceValues_.resize(frameCount_, 0);
+    renderTargets_.resize(frameCount_);
+    commandAllocators_.resize(frameCount_);
+
     std::cout << "[DX12 Init] Creating device..." << std::endl;
     CreateDevice();
     std::cout << "[DX12 Init] Creating command queue..." << std::endl;
     CreateCommandQueue();
-    std::cout << "[DX12 Init] Creating swap chain..." << std::endl;
-    CreateSwapChain();
+    if (!config_.headless) {
+        std::cout << "[DX12 Init] Creating swap chain..." << std::endl;
+        CreateSwapChain();
+    }
     std::cout << "[DX12 Init] Creating descriptor heaps..." << std::endl;
     CreateDescriptorHeaps();
-    std::cout << "[DX12 Init] Creating render targets..." << std::endl;
-    CreateRenderTargets();
+    if (!config_.headless) {
+        std::cout << "[DX12 Init] Creating render targets..." << std::endl;
+        CreateRenderTargets();
+    }
     std::cout << "[DX12 Init] Creating command allocators..." << std::endl;
     CreateCommandAllocatorsAndList();
     std::cout << "[DX12 Init] Creating fence..." << std::endl;
@@ -290,7 +299,7 @@ void DX12Backend::CreateSwapChain() {
     }
 
     DXGI_SWAP_CHAIN_DESC1 sd{};
-    sd.BufferCount      = kFrameCount;
+    sd.BufferCount      = frameCount_;
     sd.Width            = kWindowWidth;
     sd.Height           = kWindowHeight;
     sd.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -310,12 +319,14 @@ void DX12Backend::CreateSwapChain() {
 }
 
 void DX12Backend::CreateDescriptorHeaps() {
-    D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
-    rtvDesc.NumDescriptors = kFrameCount;
-    rtvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    ThrowIfFailed(device_->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&rtvHeap_)),
-                  "CreateDescriptorHeap RTV failed");
-    rtvDescriptorSize_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    if (!config_.headless) {
+        D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
+        rtvDesc.NumDescriptors = frameCount_;
+        rtvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        ThrowIfFailed(device_->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&rtvHeap_)),
+                      "CreateDescriptorHeap RTV failed");
+        rtvDescriptorSize_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    }
 
     D3D12_DESCRIPTOR_HEAP_DESC uavDesc{};
     uavDesc.NumDescriptors = 1;
@@ -327,7 +338,7 @@ void DX12Backend::CreateDescriptorHeaps() {
 
 void DX12Backend::CreateRenderTargets() {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = rtvHeap_->GetCPUDescriptorHandleForHeapStart();
-    for (UINT i = 0; i < kFrameCount; ++i) {
+    for (UINT i = 0; i < frameCount_; ++i) {
         ThrowIfFailed(swapChain_->GetBuffer(i, IID_PPV_ARGS(&renderTargets_[i])),
                       "GetBuffer failed");
         device_->CreateRenderTargetView(renderTargets_[i].Get(), nullptr, handle);
@@ -336,7 +347,7 @@ void DX12Backend::CreateRenderTargets() {
 }
 
 void DX12Backend::CreateCommandAllocatorsAndList() {
-    for (UINT i = 0; i < kFrameCount; ++i) {
+    for (UINT i = 0; i < frameCount_; ++i) {
         ThrowIfFailed(device_->CreateCommandAllocator(
             D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocators_[i])),
             "CreateCommandAllocator failed");
@@ -386,7 +397,7 @@ void DX12Backend::CreateRootSignatures() {
     }
 
     // Graphics root signature: empty, allows input assembler
-    {
+    if (!config_.headless) {
         D3D12_ROOT_SIGNATURE_DESC desc{};
         desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -403,8 +414,6 @@ void DX12Backend::CreateRootSignatures() {
 
 void DX12Backend::CreatePipelineStates() {
     auto csBlob = CompileShader(shaderDir_ + "compute.hlsl",    "CSMain", "cs_5_1");
-    auto vsBlob = CompileShader(shaderDir_ + "particle_vs.hlsl","VSMain", "vs_5_1");
-    auto psBlob = CompileShader(shaderDir_ + "particle_ps.hlsl","PSMain", "ps_5_1");
 
     // Compute PSO
     {
@@ -414,6 +423,11 @@ void DX12Backend::CreatePipelineStates() {
         ThrowIfFailed(device_->CreateComputePipelineState(&d, IID_PPV_ARGS(&computePSO_)),
                       "CreateComputePipelineState failed");
     }
+
+    if (config_.headless) return;
+
+    auto vsBlob = CompileShader(shaderDir_ + "particle_vs.hlsl","VSMain", "vs_5_1");
+    auto psBlob = CompileShader(shaderDir_ + "particle_ps.hlsl","PSMain", "ps_5_1");
 
     // Graphics PSO
     {
@@ -541,7 +555,7 @@ void DX12Backend::CreateTimestampResources() {
 
     D3D12_QUERY_HEAP_DESC qhd{};
     qhd.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-    qhd.Count = kTimestampsPerFrame * kFrameCount;
+    qhd.Count = kTimestampsPerFrame * frameCount_;
     if (FAILED(device_->CreateQueryHeap(&qhd, IID_PPV_ARGS(&timestampHeap_)))) {
         std::cout << "[Profiling] Failed to create query heap -- disabled.\n";
         return;
@@ -552,7 +566,7 @@ void DX12Backend::CreateTimestampResources() {
 
     D3D12_RESOURCE_DESC rd{};
     rd.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-    rd.Width            = sizeof(UINT64) * kTimestampsPerFrame * kFrameCount;
+    rd.Width            = sizeof(UINT64) * kTimestampsPerFrame * frameCount_;
     rd.Height           = 1;
     rd.DepthOrArraySize = 1;
     rd.MipLevels        = 1;
@@ -632,6 +646,67 @@ void DX12Backend::DrawFrame(float deltaTime) {
     commandList_->Reset(alloc.Get(), nullptr);
 
     const UINT tsBase = frameIndex_ * kTimestampsPerFrame;
+
+    if (config_.headless) {
+        // --- Headless: compute-only path ---
+        // Transition VBV -> UAV
+        D3D12_RESOURCE_BARRIER b{};
+        b.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        b.Transition.pResource   = particleBuffer_.Get();
+        b.Transition.StateBefore = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        b.Transition.StateAfter  = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        commandList_->ResourceBarrier(1, &b);
+
+        if (timestampsSupported_)
+            commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 0);
+
+        commandList_->SetComputeRootSignature(computeRootSig_.Get());
+        commandList_->SetPipelineState(computePSO_.Get());
+        ID3D12DescriptorHeap* heaps[] = { cbvSrvUavHeap_.Get() };
+        commandList_->SetDescriptorHeaps(1, heaps);
+        commandList_->SetComputeRootDescriptorTable(0,
+            cbvSrvUavHeap_->GetGPUDescriptorHandleForHeapStart());
+        ComputeParams params{ deltaTime, 0.9f };
+        commandList_->SetComputeRoot32BitConstants(1, 2, &params, 0);
+        commandList_->Dispatch(config_.particleCount / kComputeWorkGroupSize, 1, 1);
+
+        if (timestampsSupported_)
+            commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 1);
+
+        // UAV barrier then back to VBV for consistency
+        D3D12_RESOURCE_BARRIER uavB{};
+        uavB.Type           = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        uavB.UAV.pResource  = particleBuffer_.Get();
+        commandList_->ResourceBarrier(1, &uavB);
+        b.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        b.Transition.StateAfter  = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        commandList_->ResourceBarrier(1, &b);
+
+        // Mirror timestamps 2/3 = 0/1 for headless (no render)
+        if (timestampsSupported_) {
+            commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 2);
+            commandList_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, tsBase + 3);
+        }
+
+        if (timestampsSupported_)
+            commandList_->ResolveQueryData(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
+                                           tsBase, kTimestampsPerFrame,
+                                           timestampReadback_.Get(),
+                                           tsBase * sizeof(UINT64));
+
+        ThrowIfFailed(commandList_->Close(), "CommandList Close failed");
+        ID3D12CommandList* lists[] = { commandList_.Get() };
+        commandQueue_->ExecuteCommandLists(1, lists);
+
+        commandQueue_->Signal(fence_.Get(), nextFenceValue_);
+        frameFenceValues_[frameIndex_] = nextFenceValue_;
+        ++nextFenceValue_;
+        frameIndex_ = (frameIndex_ + 1) % frameCount_;
+        return;
+    }
+
+    // --- Normal (windowed) path ---
 
     // --- Transition particle buffer VBV -> UAV ---
     D3D12_RESOURCE_BARRIER barriers[2]{};

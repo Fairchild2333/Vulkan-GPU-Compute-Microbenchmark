@@ -95,11 +95,13 @@ void OpenGLBackend::InitBackend() {
     std::cout << "[OpenGL Init] Creating timestamp queries..." << std::endl;
     CreateTimestampQueries();
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_PROGRAM_POINT_SIZE);
-    glViewport(0, 0, static_cast<GLsizei>(kWindowWidth),
-               static_cast<GLsizei>(kWindowHeight));
+    if (!config_.headless) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_PROGRAM_POINT_SIZE);
+        glViewport(0, 0, static_cast<GLsizei>(kWindowWidth),
+                   static_cast<GLsizei>(kWindowHeight));
+    }
 
     std::cout << "[OpenGL Init] Initialisation complete." << std::endl;
 }
@@ -109,7 +111,7 @@ void OpenGLBackend::CreateShaders() {
         auto cs = CompileShaderGL(shaderDir_ + "compute_gl.comp", GL_COMPUTE_SHADER);
         computeProgram_ = LinkProgramGL(cs, 0);
     }
-    {
+    if (!config_.headless) {
         auto vs = CompileShaderGL(shaderDir_ + "particle_gl.vert", GL_VERTEX_SHADER);
         auto fs = CompileShaderGL(shaderDir_ + "particle_gl.frag", GL_FRAGMENT_SHADER);
         renderProgram_ = LinkProgramGL(vs, fs);
@@ -135,20 +137,22 @@ void OpenGLBackend::CreateParticleBuffers() {
     std::cout << "Created particle buffers: " << config_.particleCount
               << " particles" << std::endl;
 
-    // VAO — bind the same SSBO as vertex buffer
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
-    glBindBuffer(GL_ARRAY_BUFFER, ssbo_);
+    // VAO — bind the same SSBO as vertex buffer (not needed in headless)
+    if (!config_.headless) {
+        glGenVertexArrays(1, &vao_);
+        glBindVertexArray(vao_);
+        glBindBuffer(GL_ARRAY_BUFFER, ssbo_);
 
-    // location 0 = position (vec4), location 1 = velocity (vec4)
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE,
-                          sizeof(Particle), reinterpret_cast<void*>(0));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE,
-                          sizeof(Particle),
-                          reinterpret_cast<void*>(offsetof(Particle, vx)));
-    glBindVertexArray(0);
+        // location 0 = position (vec4), location 1 = velocity (vec4)
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE,
+                              sizeof(Particle), reinterpret_cast<void*>(0));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE,
+                              sizeof(Particle),
+                              reinterpret_cast<void*>(offsetof(Particle, vx)));
+        glBindVertexArray(0);
+    }
 
     // UBO for compute params (deltaTime + bounds, std140 padded to 16 bytes)
     glGenBuffers(1, &ubo_);
@@ -205,26 +209,46 @@ void OpenGLBackend::DrawFrame(float deltaTime) {
     if (timestampsSupported_)
         glQueryCounter(timestampQueries_[slot][1], GL_TIMESTAMP);
 
-    // Barrier: ensure compute writes are visible to vertex fetch
-    glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
+    if (config_.headless) {
+        // Headless: barrier for compute coherency, mirror timestamps
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        if (timestampsSupported_) {
+            glQueryCounter(timestampQueries_[slot][2], GL_TIMESTAMP);
+            glQueryCounter(timestampQueries_[slot][3], GL_TIMESTAMP);
+        }
+        // Periodic glFinish to force AMD driver to process commands on
+        // hidden windows (glFlush alone is insufficient on some drivers).
+        // Every 16 frames: full sync; otherwise: fence + flush.
+        if (currentFrame_ % 16 == 0) {
+            glFinish();
+        } else {
+            if (frameFences_[slot])
+                glDeleteSync(static_cast<GLsync>(frameFences_[slot]));
+            frameFences_[slot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            glFlush();
+        }
+    } else {
+        // Barrier: ensure compute writes are visible to vertex fetch
+        glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 
-    // -- Render --
-    glClearColor(0.0f, 0.0f, 0.02f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+        // -- Render --
+        glClearColor(0.0f, 0.0f, 0.02f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
 
-    // -- Timestamp: render begin --
-    if (timestampsSupported_)
-        glQueryCounter(timestampQueries_[slot][2], GL_TIMESTAMP);
+        // -- Timestamp: render begin --
+        if (timestampsSupported_)
+            glQueryCounter(timestampQueries_[slot][2], GL_TIMESTAMP);
 
-    glUseProgram(renderProgram_);
-    glBindVertexArray(vao_);
-    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(config_.particleCount));
+        glUseProgram(renderProgram_);
+        glBindVertexArray(vao_);
+        glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(config_.particleCount));
 
-    // -- Timestamp: render end --
-    if (timestampsSupported_)
-        glQueryCounter(timestampQueries_[slot][3], GL_TIMESTAMP);
+        // -- Timestamp: render end --
+        if (timestampsSupported_)
+            glQueryCounter(timestampQueries_[slot][3], GL_TIMESTAMP);
 
-    glfwSwapBuffers(window_);
+        glfwSwapBuffers(window_);
+    }
 
     currentFrame_++;
     if (timestampsSupported_ && timestampFrameCount_ < kTimestampSlotCount)
@@ -233,6 +257,17 @@ void OpenGLBackend::DrawFrame(float deltaTime) {
 
 void OpenGLBackend::CollectTimestampResults() {
     const int readSlot = (currentFrame_) % kTimestampSlotCount;
+
+    // In headless mode, check the fence to see if GPU finished this slot's work.
+    // glFlush alone doesn't guarantee query availability on all drivers.
+    if (config_.headless && frameFences_[readSlot]) {
+        GLenum res = glClientWaitSync(static_cast<GLsync>(frameFences_[readSlot]),
+                                      GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+        if (res == GL_TIMEOUT_EXPIRED || res == GL_WAIT_FAILED)
+            return;  // GPU not done yet, skip this frame's timing
+        glDeleteSync(static_cast<GLsync>(frameFences_[readSlot]));
+        frameFences_[readSlot] = nullptr;
+    }
 
     GLint available = GL_FALSE;
     glGetQueryObjectiv(timestampQueries_[readSlot][3],
@@ -257,6 +292,12 @@ void OpenGLBackend::CollectTimestampResults() {
 // -----------------------------------------------------------------------
 
 void OpenGLBackend::CleanupBackend() {
+    for (int s = 0; s < kTimestampSlotCount; ++s) {
+        if (frameFences_[s]) {
+            glDeleteSync(static_cast<GLsync>(frameFences_[s]));
+            frameFences_[s] = nullptr;
+        }
+    }
     if (timestampsSupported_) {
         for (int s = 0; s < kTimestampSlotCount; ++s)
             glDeleteQueries(kTimestampsPerFrame, timestampQueries_[s]);

@@ -221,16 +221,39 @@ void AppBase::UpdateRenderDocCapturePath() {
     while (!gpuTag.empty() && gpuTag.back() == '_') gpuTag.pop_back();
 
     std::string pathTemplate = rdocCaptureDir_ + backendTag + "_" + gpuTag;
+
+    // Append flights/particles info when overridden
+    if (config_.framesInFlight != kMaxFramesInFlight)
+        pathTemplate += "_flights" + std::to_string(config_.framesInFlight);
+    if (config_.particlesOverridden)
+        pathTemplate += "_particles" + std::to_string(config_.particleCount);
+
     api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 }
 
 void AppBase::Run() {
-    InitRenderDoc();
-    InitWindow();
+    if (!config_.headless)
+        InitRenderDoc();
+
+    // OpenGL always needs a window for its GL context, even in headless mode.
+    // Other backends skip window creation entirely in headless mode.
+    // glfwInit() is always needed for glfwGetTime() used in MainLoop.
+    if (!config_.headless || NeedsOpenGLContext()) {
+        InitWindow();
+    } else {
+        // Headless non-OpenGL: still need glfwInit for timing
+        if (glfwInit() != GLFW_TRUE)
+            throw std::runtime_error("glfwInit failed");
+    }
+
     GenerateInitialParticles();
     InitBackend();
-    UpdateRenderDocCapturePath();
-    glfwShowWindow(window_);
+
+    if (!config_.headless) {
+        UpdateRenderDocCapturePath();
+        glfwShowWindow(window_);
+    }
+
     MainLoop();
     PrintSummary();
 
@@ -297,11 +320,17 @@ void AppBase::MainLoop() {
     bool f12WasPressed = false;
     bool timeCaptureTriggered = false;
 
-    while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
-        glfwPollEvents();
+    auto shouldContinue = [&]() -> bool {
+        if (config_.headless) return true;  // headless: exit via time/frame limit only
+        return glfwWindowShouldClose(window_) == GLFW_FALSE;
+    };
+
+    while (shouldContinue()) {
+        if (!config_.headless)
+            glfwPollEvents();
 
         auto* rdoc = static_cast<RENDERDOC_API_1_6_0*>(rdocApi_);
-        if (rdoc) {
+        if (rdoc && !config_.headless) {
             bool f12Down = glfwGetKey(window_, GLFW_KEY_F12) == GLFW_PRESS;
             if (f12Down && !f12WasPressed)
                 rdocCaptureRequested_ = true;
@@ -450,15 +479,17 @@ void AppBase::ReportTimingIfDue(double deltaTime) {
         std::cout << "[FPS] " << static_cast<int>(fps) << std::endl;
     }
 
-    std::string title = GetBackendName() + " Particle Sim  |  FPS: "
-                      + std::to_string(static_cast<int>(fps));
-    if (timingSampleCount_ > 0) {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2)
-            << "  |  GPU: " << (accumTotalGpuMs_ / timingSampleCount_) << " ms";
-        title += oss.str();
+    if (!config_.headless && window_) {
+        std::string title = GetBackendName() + " Particle Sim  |  FPS: "
+                          + std::to_string(static_cast<int>(fps));
+        if (timingSampleCount_ > 0) {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(2)
+                << "  |  GPU: " << (accumTotalGpuMs_ / timingSampleCount_) << " ms";
+            title += oss.str();
+        }
+        glfwSetWindowTitle(window_, title.c_str());
     }
-    glfwSetWindowTitle(window_, title.c_str());
 
     accumComputeMs_    = 0.0;
     accumRenderMs_     = 0.0;
@@ -498,9 +529,11 @@ void AppBase::PrintSummary() const {
         << std::setw(14) << "CPU:"        << GetCpuName() << "\n"
         << std::setw(14) << "OS:"         << GetOsVersion() << "\n"
         << std::setw(14) << "Memory:"     << (config_.hostMemory ? "Host-visible (System RAM)" : "Device-local") << "\n"
+        << std::setw(14) << "Mode:"       << (config_.headless ? "Headless (compute only)" : "Windowed") << "\n"
         << std::setw(14) << "Resolution:" << kWindowWidth << "x" << kWindowHeight << "\n"
         << std::setw(14) << "Particles:"  << config_.particleCount
             << " (" << config_.difficultyLabel << ")\n"
+        << std::setw(14) << "Flights:"    << config_.framesInFlight << "\n"
         << std::setw(14) << "V-Sync:"     << (config_.vsync ? "ON" : "OFF") << "\n"
         << std::setw(14) << "Duration:"
             << std::setprecision(1) << duration << " s"
@@ -578,6 +611,8 @@ BenchmarkResult AppBase::CollectResult() const {
     r.particleCount = config_.particleCount;
     r.difficulty  = config_.difficultyLabel;
     r.vsync       = config_.vsync;
+    r.headless    = config_.headless;
+    r.framesInFlight = config_.framesInFlight;
 
     const std::string devName = GetDeviceName();
     r.isSoftware = (devName.find("Basic Render") != std::string::npos ||
