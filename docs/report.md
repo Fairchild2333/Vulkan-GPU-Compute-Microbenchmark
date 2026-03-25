@@ -73,6 +73,61 @@ All five backends share the same `AppBase` class for windowing (GLFW), particle
 initialisation, timing, and benchmark result management. Each backend overrides
 `InitBackend()`, `DrawFrame()`, `CleanupBackend()`, and `WaitIdle()`.
 
+### Test Hardware
+
+All benchmarks in this report were collected on four physical systems using
+the GPUs and CPUs listed below.
+
+#### AMD GPUs (Primary Test Fleet)
+
+Nine AMD GPUs spanning four architecture generations and 15 years (2009–2024),
+including seven discrete GPUs and two integrated GPUs:
+
+| GPU | Architecture | Year | CU / SP | FP32 (TFLOPS) | Memory |
+|-----|-------------|------|---------|---------------|--------|
+| **RX 9070 XT** | RDNA 4 | 2024 | 64 CU (4096 SP) | 48.70 † | 16 GB GDDR6, 640 GB/s |
+| **RX 6900 XT** | RDNA 2 | 2020 | 80 CU (5120 SP) | 23.04 | 16 GB GDDR6, 512 GB/s |
+| **RX 6600 XT** | RDNA 2 | 2021 | 32 CU (2048 SP) | 10.60 | 8 GB GDDR6, 256 GB/s |
+| **Vega Frontier Edition** | GCN 5 (Vega) | 2017 | 64 CU (4096 SP) | 13.11 | 16 GB HBM2, 483 GB/s |
+| **RX 580** | GCN 4 (Polaris) | 2017 | 36 CU (2304 SP) | 6.17 | 8 GB GDDR5, 256 GB/s |
+| **FirePro D700** | GCN 1.0 (Tahiti) | 2013 | 32 CU (2048 SP) | 3.48 | 6 GB GDDR5, 264 GB/s |
+| **HD 5770** | TeraScale 2 (Juniper) | 2009 | 10 SIMD (800 SP) | 1.36 | 1 GB GDDR5, 77 GB/s |
+| **Ryzen 7 9800X3D iGPU** | RDNA 2 | 2024 | 2 CU (128 SP) | 0.56 | Shared DDR5, ~90 GB/s |
+| **Ryzen 5 7600 iGPU** | RDNA 2 | 2023 | 2 CU (128 SP) | 0.56 | Shared DDR5, ~90 GB/s |
+
+> † RDNA 4 uses dual-issue FP32; traditional single-issue calculation yields 24.3 TFLOPS.
+> The two iGPUs are architecturally identical (RDNA 2, 2 CU, 2200 MHz) but sit
+> in different CPU platforms (Zen 5 3D V-Cache vs Zen 4).
+
+#### NVIDIA Discrete GPUs
+
+| GPU | Architecture | Year | CUDA Cores | FP32 (TFLOPS) | Memory |
+|-----|-------------|------|-----------|---------------|--------|
+| **RTX 5090** | Blackwell | 2025 | 21,760 | 104.8 | 32 GB GDDR7, 1792 GB/s |
+| **GTX 970** | Maxwell 2.0 | 2014 | 1,664 | 3.92 | 4 GB GDDR5, 224 GB/s |
+
+#### Qualcomm (Windows on ARM)
+
+| GPU | Architecture | Year | ALU | FP32 (TFLOPS) | Memory |
+|-----|-------------|------|-----|---------------|--------|
+| **Adreno 640** | Adreno 6xx | 2019 | 768 | ~0.90 | Shared LPDDR4X, ~34 GB/s |
+
+> Tested on a Xiaomi Mi Pad 5 (Snapdragon 860) running Windows on ARM.
+> Supports DX11 FL 11_1, DX12 FL 12_1, and Vulkan 1.1.
+> Microsoft WARP (software renderer) is also used as a baseline — see Section 12.
+
+#### Test Platforms (CPUs)
+
+Also, All CPUs were tested with Microsoft WARP (DX11/DX12 software rasteriser)
+to measure CPU-side compute and rendering performance.
+
+| CPU | Architecture | Year | Cores / Threads | Boost Clock | TDP | Platform |
+|-----|-------------|------|----------------|-------------|-----|----------|
+| **AMD Ryzen 7 9800X3D** | Zen 5 + 3D V-Cache | 2024 | 8C / 16T | 5.2 GHz | 120 W | AM5, DDR5-6000 |
+| **AMD Ryzen 5 7600** | Zen 4 | 2023 | 6C / 12T | 5.1 GHz | 65 W | AM5, DDR5-6000 |
+| **Intel Xeon E5-2697 v2** | Ivy Bridge-EP | 2013 | 12C / 24T | 3.5 GHz | 130 W | LGA 2011, DDR3-1866 |
+| **Qualcomm Snapdragon 860** | Kryo 485 (A76/A55) | 2021 | 4+4 | 2.96 GHz | ~5 W | LPDDR4X, WoA |
+
 ### Key Features
 
 - **Multi-GPU support**: enumerate and select from all available GPUs
@@ -1623,7 +1678,7 @@ Each backend uses its own API's timestamp mechanism — there is no cross-API da
 | **Clock-change handling** | Returns data; timer may reset across submissions† | Returns data; stable-clock design, no resets | Refuses data if `Disjoint = TRUE` | Returns data, counter is monotonic |
 | **First-frame data** | Yes | Yes | No (ring buffer warm-up required) | Yes (after 1–2 frame delay) |
 
-**† Vulkan caveat:** The Vulkan spec notes that power management events (e.g. GPU idle → active transitions) *can reset the timestamp counter* on some implementations. This affects **cross-submission comparisons** only — timestamps within the same command buffer are always reliably comparable. The `VK_EXT_calibrated_timestamps` extension provides monotonic timestamps immune to power events, but is not required for within-frame profiling. In this benchmark, all four timestamps (compute begin/end, render begin/end) are recorded within a single command buffer, so power-state resets do not affect the results.
+**Vulkan caveat:** The Vulkan spec notes that power management events (e.g. GPU idle → active transitions) *can reset the timestamp counter* on some implementations. This affects **cross-submission comparisons** only — timestamps within the same command buffer are always reliably comparable. The `VK_EXT_calibrated_timestamps` extension provides monotonic timestamps immune to power events, but is not required for within-frame profiling. In this benchmark, all four timestamps (compute begin/end, render begin/end) are recorded within a single command buffer, so power-state resets do not affect the results.
 
 **DX12's stable-clock design:** DX12 goes further than Vulkan by explicitly stabilising the GPU clock for timestamp purposes. Two timestamps within the same command list are always comparable, and two timestamps from *different* command lists are also reliable as long as the GPU did not idle between them. There is no Disjoint equivalent — the API guarantees clock stability by design.
 
@@ -1722,7 +1777,7 @@ This demonstrates that **API performance rankings are not universal — they dep
 
 ### Pre-Compute-Shader GPUs: Why the GT 120 / 9500 GT Cannot Run This Benchmark
 
-During testing, a GeForce 9500 GT (G96, 2008) was detected with only **DX11 API at Feature Level 10_0**. The benchmark failed immediately:
+I also have a GeForce GT 120 (2009) — a Mac Edition card that Windows detects as a **GeForce 9500 GT**, since both use the identical G96 GPU die. I planned to include it in this project, but during testing it was detected with only **DX11 API at Feature Level 10_0**. The benchmark failed immediately:
 
 ```
 Feature Level: 10_0
@@ -1774,7 +1829,7 @@ CreateGeometryShader()       → succeeds (geometry shaders available since FL 1
 CreateHullShader()           → would FAIL (tessellation needs FL 11_0)
 ```
 
-This same distinction explains 3DMark compatibility: tests like **Fire Strike** (DX11) require FL 11_0 features (tessellation, compute-based post-processing) and will not run on the 9500 GT. Tests like **Cloud Gate** (DX10/FL 10_0) use only vertex, pixel, and geometry shaders, and run successfully. The "DX11" label in both cases refers to the API version used for rendering, not the minimum hardware requirement — which is determined by the Feature Level.
+This same distinction explains 3DMark compatibility: tests like **Fire Strike** (DX11) require FL 11_0 features (tessellation, compute-based post-processing) and will not run on the 9500 GT. Tests like **Cloud Gate** (DX11/FL 10_0) use only vertex, pixel, and geometry shaders, and run successfully. The "DX11" label in both cases refers to the API version used for rendering, not the minimum hardware requirement — which is determined by the Feature Level.
 
 ### Shader Model, Shading Languages, and the Rendering Pipeline
 
@@ -1987,13 +2042,13 @@ The Adreno 640 in this benchmark is, in a historical sense, a distant cousin of 
 
 ### Why Include an Adreno GPU in a Desktop GPU Benchmark?
 
-The test device is a **Xiaomi Pad 5** (小米平板5) — an Android tablet originally shipping with MIUI based on Android 11. Through community-developed custom firmware (Project Renegade / Windows on ARM for Snapdragon 855/860 tablets), Windows 11 ARM64 was installed on this device, replacing the Android operating system entirely. The tablet boots directly into Windows 11, with Qualcomm-provided WDDM drivers exposing the Adreno 640 as a standard Windows GPU — complete with Vulkan, DirectX 12, and DirectX 11 support.
+The test device is a **Xiaomi Pad 5** — an Android tablet originally shipping with MIUI 12.5 based on Android 11. Through community-developed custom firmware (Project Renegade / Windows on ARM for Snapdragon 855/860 tablets), Windows 11 ARM64 was installed on this device, replacing the Android operating system entirely. The tablet boots directly into Windows 11, with Qualcomm-provided WDDM drivers exposing the Adreno 640 as a standard Windows GPU — complete with Vulkan, DirectX 12, and DirectX 11 support.
 
-**The motivation for testing this device is rooted in the ATI → AMD → Qualcomm lineage documented in the previous section.** The Adreno GPU traces its origin to ATI's Imageon mobile GPU division, which AMD sold to Qualcomm in 2008. Qualcomm renamed Imageon to Adreno — literally an anagram of "Radeon." In a historical sense, the Adreno 640 is a distant descendant of the same ATI family tree as every Radeon GPU in this benchmark. It is, loosely speaking, still an "A-card" (A卡) — making it a fitting, if unconventional, addition to a benchmark suite that already spans ATI/AMD GPUs from TeraScale 2 (2009) through RDNA 4 (2025).
+**The motivation for testing this device is rooted in the ATI → AMD → Qualcomm lineage documented in the previous section.** The Adreno GPU traces its origin to ATI's Imageon mobile GPU division, which AMD sold to Qualcomm in 2008. Qualcomm renamed Imageon to **Adreno** — an anagram of "Radeon" — and has since developed it into a fully independent architecture. While Adreno shares no silicon or ISA with modern Radeon GPUs, the historical connection means this benchmark suite now covers both branches of ATI's GPU family tree: the Radeon line (TeraScale 2 → GCN → RDNA 4) and the Adreno line that diverged in 2008.
 
 Including the Adreno 640 also provides unique data points not available from any desktop GPU:
 
-1. **Mobile vs desktop GPU scaling**: How does a 3W tablet SoC GPU compare against 75–300W discrete desktop GPUs running the exact same compute + render workload?
+1. **Mobile vs desktop GPU scaling**: How does a 2-5W tablet SoC GPU compare against 75–300W discrete desktop GPUs running the exact same compute + render workload?
 2. **Qualcomm driver maturity**: Qualcomm's Windows GPU drivers are relatively new (first WoA devices shipped 2023). How do they perform compared to AMD and NVIDIA's decade-old Windows driver stacks?
 3. **ARM64 vs x64 binary translation**: The same benchmark compiled as ARM64 (native) and x64 (Prism emulation) on identical hardware reveals the exact CPU-side overhead of Microsoft's binary translation layer — with GPU times serving as a constant control variable.
 
@@ -2002,12 +2057,12 @@ Including the Adreno 640 also provides unique data points not available from any
 | Component | Specification |
 |-----------|--------------|
 | Device | Xiaomi Pad 5 (nabu) — Android tablet running Windows 11 ARM64 via [Renegade Project](https://github.com/edk2-porting) / [Port-Windows-11-Xiaomi-Pad-5](https://github.com/erdilS/Port-Windows-11-Xiaomi-Pad-5) |
-| Original OS | Android 11 (MIUI 12.5) |
+| Previous OSs | Android 15 (HyperOS 2) |
 | Current OS | Windows 11 Pro ARM64 (NT 10.0.26100) |
 | SoC | Qualcomm Snapdragon 860 (SM8150-AC) — a binned Snapdragon 855+ |
 | CPU | Kryo 585: 1× A77 @ 2.96 GHz (prime) + 3× A77 @ 2.42 GHz (performance) + 4× A55 @ 1.80 GHz (efficiency) |
 | GPU | Qualcomm Adreno 640, ~585 MHz boost, 384 ALUs |
-| RAM | 6 GB LPDDR4X (shared between CPU and GPU) |
+| RAM | 12 GB LPDDR4X (shared between CPU and GPU) |
 | VRAM | Shared (reported as 1 MB by driver — a Qualcomm WDDM driver reporting limitation, not actual VRAM size) |
 | Vulkan | 1.1.276 (Qualcomm proprietary driver, build 2023-10-23) |
 | DX12 | Feature Level 12_1 (driver 27.20.2060.0) |
