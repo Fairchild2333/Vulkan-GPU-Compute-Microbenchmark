@@ -38,7 +38,8 @@ void VulkanBackend::InitBackend() {
     SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(computePipeline_),  "Compute Pipeline");
     if (!config_.headless)
         SetObjectName(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<std::uint64_t>(graphicsPipeline_), "Graphics Pipeline");
-    SetObjectName(VK_OBJECT_TYPE_RENDER_PASS, reinterpret_cast<std::uint64_t>(renderPass_),    "Main Render Pass");
+    if (!config_.headless)
+        SetObjectName(VK_OBJECT_TYPE_RENDER_PASS, reinterpret_cast<std::uint64_t>(renderPass_), "Main Render Pass");
 }
 
 void VulkanBackend::WaitIdle() {

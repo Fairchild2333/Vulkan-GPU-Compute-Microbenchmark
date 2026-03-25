@@ -430,6 +430,27 @@ static std::vector<GpuInfo> ProbeGpus() {
     }
 #endif
 
+    // Remove ghost DXGI adapters: some drivers expose the same physical GPU
+    // through multiple DXGI adapters with different LUIDs.  After all API
+    // probing, if entries share the same name AND VRAM size but only some
+    // have Vulkan support, the non-Vulkan ones are ghost adapters — remove
+    // them.  In a real dual-GPU setup both instances would be Vulkan-capable.
+    for (std::size_t i = 0; i < gpus.size(); ) {
+        bool hasVulkanSibling = false;
+        for (std::size_t j = 0; j < gpus.size(); ++j) {
+            if (j != i && gpus[j].name == gpus[i].name &&
+                gpus[j].vramMB == gpus[i].vramMB && gpus[j].supportsVulkan) {
+                hasVulkanSibling = true;
+                break;
+            }
+        }
+        if (hasVulkanSibling && !gpus[i].supportsVulkan) {
+            gpus.erase(gpus.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            ++i;
+        }
+    }
+
     // Disambiguate GPUs with identical names by appending #1, #2, etc.
     for (std::size_t i = 0; i < gpus.size(); ++i) {
         const std::string original = gpus[i].name;

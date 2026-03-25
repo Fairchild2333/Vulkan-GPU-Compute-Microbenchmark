@@ -119,76 +119,114 @@ def chart_per_cu_efficiency(save_dir):
 # ── Chart 2: Generational Progression (13d) ──────────────────────────────
 
 def chart_generational(save_dir):
-    gpus = [
+    # Windowed 1M data (presentation-limited for fast GPUs)
+    gpus_windowed = [
         ("HD 5770",      "TeraScale 2", 2009, 0.21),
         ("FirePro D700", "GCN 1.0",     2013, 0.61),
         ("RX 580",       "GCN 4",       2017, 1.00),
         ("Vega FE",      "GCN 5",       2017, 1.88),
         ("RX 6600 XT",   "RDNA 2",      2021, 2.01),
-        ("RX 6900 XT",   "RDNA 2",      2020, 4.46),
+        ("RX 6900 XT",   "RDNA 2",      2020, 4.52),
         ("RX 9070 XT",   "RDNA 4",      2025, 1.95),
     ]
-
-    names   = [g[0] for g in gpus]
-    archs   = [g[1] for g in gpus]
-    years   = [g[2] for g in gpus]
-    ratios  = [g[3] for g in gpus]
-    colours = [ARCH_COLOURS.get(a, "#888") for a in archs]
+    # Headless 1M data (true compute, no presentation overhead)
+    # Normalised to RX 580 = 912 FPS (windowed baseline)
+    gpus_headless = [
+        ("RX 6900 XT",   "RDNA 2",      2020, 15950 / 912),   # 17.49×
+        ("RX 9070 XT",   "RDNA 4",      2025, 21354 / 912),   # 23.41×
+    ]
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    # Plot points
-    scatter = ax.scatter(years, ratios, c=colours, s=180, zorder=5,
-                         edgecolors="#e0e0e0", linewidths=1.2)
+    # --- Windowed points (filled circles) ---
+    w_names   = [g[0] for g in gpus_windowed]
+    w_archs   = [g[1] for g in gpus_windowed]
+    w_years   = [g[2] for g in gpus_windowed]
+    w_ratios  = [g[3] for g in gpus_windowed]
+    w_colours = [ARCH_COLOURS.get(a, "#888") for a in w_archs]
 
-    # Connect with line (sorted by year, then ratio for same year)
-    sorted_pts = sorted(zip(years, ratios), key=lambda p: (p[0], p[1]))
-    ax.plot([p[0] for p in sorted_pts], [p[1] for p in sorted_pts],
+    ax.scatter(w_years, w_ratios, c=w_colours, s=160, zorder=5,
+               edgecolors="#e0e0e0", linewidths=1.2, marker="o")
+
+    # Connect windowed with dashed line
+    sorted_w = sorted(zip(w_years, w_ratios), key=lambda p: (p[0], p[1]))
+    ax.plot([p[0] for p in sorted_w], [p[1] for p in sorted_w],
             color="#e0e0e0", alpha=0.3, linewidth=1.5, linestyle="--", zorder=1)
 
-    # Labels
-    offsets = {
+    # Labels for windowed
+    offsets_w = {
         "HD 5770": (8, 10), "FirePro D700": (8, 10), "RX 580": (8, -18),
-        "Vega FE": (8, 8), "RX 6600 XT": (8, -18), "RX 6900 XT": (8, 8),
-        "RX 9070 XT": (-80, -20),
+        "Vega FE": (8, 8), "RX 6600 XT": (8, -18), "RX 6900 XT": (-95, -10),
+        "RX 9070 XT": (-95, -18),
     }
-    for name, year, ratio, arch in zip(names, years, ratios, archs):
-        ox, oy = offsets.get(name, (8, 8))
+    for name, year, ratio, arch in zip(w_names, w_years, w_ratios, w_archs):
+        ox, oy = offsets_w.get(name, (8, 8))
         ax.annotate(f"{name}\n{ratio:.2f}×",
                     xy=(year, ratio), xytext=(ox, oy),
-                    textcoords="offset points", fontsize=9,
+                    textcoords="offset points", fontsize=8,
                     color=ARCH_COLOURS.get(arch, "#e0e0e0"),
                     fontweight="bold",
                     arrowprops=dict(arrowstyle="-", color="#666", lw=0.8)
                     if abs(ox) > 30 or abs(oy) > 30 else None)
+
+    # --- Headless points (star markers, larger) ---
+    h_names   = [g[0] for g in gpus_headless]
+    h_archs   = [g[1] for g in gpus_headless]
+    h_years   = [g[2] for g in gpus_headless]
+    h_ratios  = [g[3] for g in gpus_headless]
+    h_colours = [ARCH_COLOURS.get(a, "#888") for a in h_archs]
+
+    ax.scatter(h_years, h_ratios, c=h_colours, s=250, zorder=6,
+               edgecolors="#e0e0e0", linewidths=1.5, marker="*")
+
+    # Arrow from windowed to headless for each GPU
+    for wg in gpus_windowed:
+        for hg in gpus_headless:
+            if wg[0] == hg[0]:
+                ax.annotate("",
+                            xy=(hg[2], hg[3]), xytext=(wg[2], wg[3]),
+                            arrowprops=dict(arrowstyle="->", color=ARCH_COLOURS.get(wg[1], "#888"),
+                                            lw=1.8, alpha=0.6))
+
+    # Labels for headless
+    offsets_h = {
+        "RX 6900 XT": (8, 8),
+        "RX 9070 XT": (8, 8),
+    }
+    for name, year, ratio, arch in zip(h_names, h_years, h_ratios, h_archs):
+        ox, oy = offsets_h.get(name, (8, 8))
+        ax.annotate(f"{name} (headless)\n{ratio:.1f}×",
+                    xy=(year, ratio), xytext=(ox, oy),
+                    textcoords="offset points", fontsize=9,
+                    color=ARCH_COLOURS.get(arch, "#e0e0e0"),
+                    fontweight="bold")
 
     # Baseline
     ax.axhline(y=1.0, color="#F1C40F", linestyle=":", linewidth=1, alpha=0.5)
 
     ax.set_xlabel("Release Year")
     ax.set_ylabel("Performance (normalised to RX 580 = 1.00×)")
-    ax.set_title("AMD GPU Generational Performance Progression (Best API FPS)",
+    ax.set_title("AMD GPU Generational Progression — Windowed vs Headless",
                  fontsize=14, fontweight="bold", pad=12)
     ax.set_xlim(2007, 2027)
-    ax.set_ylim(0, max(ratios) * 1.2)
+    ax.set_ylim(0, max(h_ratios) * 1.25)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(2))
     ax.grid(alpha=0.3)
 
     # Legend
     from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
     seen = {}
-    for a in archs:
+    for a in w_archs + h_archs:
         if a not in seen:
             seen[a] = ARCH_COLOURS.get(a, "#888")
     legend_handles = [Patch(facecolor=c, edgecolor="#333", label=a)
                       for a, c in seen.items()]
+    legend_handles.append(Line2D([0], [0], marker="o", color="#888", markersize=8,
+                                  linestyle="", label="Windowed 1M"))
+    legend_handles.append(Line2D([0], [0], marker="*", color="#888", markersize=12,
+                                  linestyle="", label="Headless 1M"))
     ax.legend(handles=legend_handles, loc="upper left", fontsize=9)
-
-    # Annotation for 9070 XT
-    ax.annotate("← presentation-limited\n   (see Section 17)",
-                xy=(2025, 1.95), xytext=(2022.5, 3.2),
-                fontsize=8, color="#9B59B6", fontstyle="italic",
-                arrowprops=dict(arrowstyle="->", color="#9B59B6", lw=1.2))
 
     fig.tight_layout()
     if save_dir:

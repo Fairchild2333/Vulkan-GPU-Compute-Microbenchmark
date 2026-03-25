@@ -14,7 +14,7 @@
   "gpus": [
     {
       "name":            "RX 9070 XT",
-      "architecture":    "RDNA 4 (32 CU)",
+      "architecture":    "RDNA 4 (64 CU)",
       "timeSpy":         28493,
       "fireStrike":      67127,
       "steelNomad":      6884,

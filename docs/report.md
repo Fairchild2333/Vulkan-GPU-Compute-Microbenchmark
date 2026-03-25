@@ -85,7 +85,7 @@ including seven discrete GPUs and two integrated GPUs:
 
 | GPU | Architecture | Year | CU / SP | FP32 (TFLOPS) | Memory |
 |-----|-------------|------|---------|---------------|--------|
-| **RX 9070 XT** | RDNA 4 | 2024 | 64 CU (4096 SP) | 48.70 † | 16 GB GDDR6, 640 GB/s |
+| **RX 9070 XT** | RDNA 4 | 2025 | 64 CU (4096 SP) | 48.70 † | 16 GB GDDR6, 640 GB/s |
 | **RX 6900 XT** | RDNA 2 | 2020 | 80 CU (5120 SP) | 23.04 | 16 GB GDDR6, 512 GB/s |
 | **RX 6600 XT** | RDNA 2 | 2021 | 32 CU (2048 SP) | 10.60 | 8 GB GDDR6, 256 GB/s |
 | **Vega Frontier Edition** | GCN 5 (Vega) | 2017 | 64 CU (4096 SP) | 13.11 | 16 GB HBM2, 483 GB/s |
@@ -95,7 +95,7 @@ including seven discrete GPUs and two integrated GPUs:
 | **Ryzen 7 9800X3D iGPU** | RDNA 2 | 2024 | 2 CU (128 SP) | 0.56 | Shared DDR5, ~90 GB/s |
 | **Ryzen 5 7600 iGPU** | RDNA 2 | 2023 | 2 CU (128 SP) | 0.56 | Shared DDR5, ~90 GB/s |
 
-> † RDNA 4 uses dual-issue FP32; traditional single-issue calculation yields 24.3 TFLOPS.
+> RDNA 4 uses dual-issue FP32; traditional single-issue calculation yields 24.3 TFLOPS.
 > The two iGPUs are architecturally identical (RDNA 2, 2 CU, 2200 MHz) but sit
 > in different CPU platforms (Zen 5 3D V-Cache vs Zen 4).
 
@@ -112,7 +112,7 @@ including seven discrete GPUs and two integrated GPUs:
 |-----|-------------|------|-----|---------------|--------|
 | **Adreno 640** | Adreno 6xx | 2019 | 768 | ~0.90 | Shared LPDDR4X, ~34 GB/s |
 
-> Tested on a Xiaomi Mi Pad 5 (Snapdragon 860) running Windows on ARM.
+> Tested on a Xiaomi Pad 5 (Snapdragon 860) running Windows on ARM.
 > Supports DX11 FL 11_1, DX12 FL 12_1, and Vulkan 1.1.
 > Microsoft WARP (software renderer) is also used as a baseline — see Section 12.
 
@@ -126,7 +126,7 @@ to measure CPU-side compute and rendering performance.
 | **AMD Ryzen 7 9800X3D** | Zen 5 + 3D V-Cache | 2024 | 8C / 16T | 5.2 GHz | 120 W | AM5, DDR5-6000 |
 | **AMD Ryzen 5 7600** | Zen 4 | 2023 | 6C / 12T | 5.1 GHz | 65 W | AM5, DDR5-6000 |
 | **Intel Xeon E5-2697 v2** | Ivy Bridge-EP | 2013 | 12C / 24T | 3.5 GHz | 130 W | LGA 2011, DDR3-1866 |
-| **Qualcomm Snapdragon 860** | Kryo 485 (A76/A55) | 2021 | 4+4 | 2.96 GHz | ~5 W | LPDDR4X, WoA |
+| **Qualcomm Snapdragon 860** | Kryo 485 (A76/A55) | 2021 | 1P+3P+4E | 2.96 GHz | 2~7 W | LPDDR4X, WoA |
 
 ### Key Features
 
@@ -379,9 +379,9 @@ Compare RenderDoc's built-in per-event timing against the application's own
 
 | Metric | App Timestamps (ms) | Notes |
 |--------|-------------------:|-------|
-| Compute dispatch | 0.025 | `vkCmdWriteTimestamp` T0 → T1 |
-| Render pass | 0.064 | `vkCmdWriteTimestamp` T2 → T3 |
-| Total GPU time | 0.090 | T0 → T3 (RTX 5090, 1M particles) |
+| Compute dispatch | 0.033 | `vkCmdWriteTimestamp` T0 → T1 |
+| Render pass | 0.408 | `vkCmdWriteTimestamp` T2 → T3 (includes swapchain semaphore wait — see Section 6) |
+| Total GPU time | 0.446 | T0 → T3 (RX 9070 XT, 1M particles) |
 
 The Chrome JSON from `renderdoccmd convert` records CPU-side API call
 durations (nanosecond resolution). For GPU-side per-event timing, open the
@@ -425,14 +425,14 @@ API backend via the RenderDoc In-Application API, converts each `.rdc` to Chrome
 JSON using `renderdoccmd convert`, and runs `rdoc_analyse.py` to produce a
 structural comparison across all four Windows backends.
 
-**Per-Frame Event Count Comparison** (RTX 5090, 1M particles, Medium):
+**Per-Frame Event Count Comparison** (RX 9070 XT, 1M particles, Medium):
 
 | API | Total Events | Frame Events | Dispatches | Draw Calls | Barriers |
 |-----|------------:|-------------:|-----------:|-----------:|---------:|
-| Vulkan 1.2 | 133 | 28 | 1 | 1 | 1 |
-| DirectX 12 | 126 | 30 | 1 | 1 | **5** |
-| DirectX 11 | 162 | 26 | 1 | 1 | **0** |
-| OpenGL 4.3 | 148 | 17 | 1 | 1 | 1 |
+| Vulkan 1.2 | 77 | 28 | 1 | 1 | 1 |
+| DirectX 12 | 74 | 30 | 1 | 1 | **5** |
+| DirectX 11 | 86 | 26 | 1 | 1 | **0** |
+| OpenGL 4.3 | 90 | 17 | 1 | 1 | 1 |
 
 #### Key Observations
 
@@ -485,9 +485,7 @@ structural comparison across all four Windows backends.
 
 ## 4. Python Benchmark Tooling
 
-Automated data analysis scripts in the `scripts/` directory, demonstrating
-Python scripting proficiency (JD: *"Scripting languages — Python, Perl,
-shell"*).
+Automated data analysis scripts in the `scripts/` directory.
 
 | Script | Purpose |
 |--------|---------|
@@ -516,7 +514,7 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | Component | Specification |
 |-----------|--------------|
 | CPU | AMD Ryzen 5 7600 6-Core Processor |
-| GPU | AMD Radeon RX 9070 XT (RDNA 4, 32 CU, 16 GB GDDR6, 512 GB/s) |
+| GPU | AMD Radeon RX 9070 XT (RDNA 4, 64 CU, 16 GB GDDR6, 640 GB/s) |
 | Driver | AMD Adrenalin 26.3.1 (LLPC) |
 | OS | Windows 11 (NT 10.0.26200) |
 | Resolution | 1280 × 720 |
@@ -525,6 +523,8 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 
 ### 5a. Cross-API Comparison — 1M Particles (Medium), Windowed
 
+**RX 9070 XT:**
+
 | # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
 |---|-----|---------|-------------|------------|---------------|----------|------------|
 | 1 | DX11 | 1,773.7 | 0.047 | 0.451 | 0.542 | 100% | GPU-bound |
@@ -532,14 +532,26 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | 3 | DX12 | 1,608.7 | 0.034 | 0.399 | 0.434 | 70% | Balanced |
 | 4 | OpenGL | 253.4 | 2.612 | 0.792 | 3.658 | 90% | GPU-bound |
 
+**RX 6900 XT:**
+
+| # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
+|---|-----|---------|-------------|------------|---------------|----------|------------|
+| 1 | DX11 | 4,067.9 | 0.047 | 0.140 | 0.226 | 90% | GPU-bound |
+| 2 | DX12 | 3,518.0 | 0.049 | 0.112 | 0.162 | 60% | Balanced |
+| 3 | Vulkan | 2,884.6 | 0.063 | 0.133 | 0.196 | 60% | Balanced |
+| 4 | OpenGL | 228.6 | 2.742 | 1.151 | 4.066 | 90% | GPU-bound |
+
 **Key observations:**
 
-- **DX11 and Vulkan are nearly tied** at ~1750 FPS, with DX11 slightly ahead. Unlike on RTX 5090 where DX11 dominates (8955 FPS vs 3611 Vulkan), the gap is much smaller on 9070 XT — AMD's DX11 driver is less optimised than NVIDIA's.
-- **DX12 is slightly behind** at 1609 FPS despite having the lowest total GPU time (0.434 ms). CPU overhead pulls it below DX11/Vulkan.
-- **OpenGL is severely penalised** — the AMD OpenGL compute overhead issue (Section 16) causes 2.612 ms compute time vs 0.033 ms on Vulkan, a **79× penalty**.
-- **All APIs show inflated render times** (0.4–0.8 ms) due to swapchain semaphore wait pollution (detailed in Section 6). The actual render work is ~0.04 ms.
+- **At 1M particles, the 6900 XT achieves higher FPS** (4,068 DX11 vs 1,774 on 9070 XT). This is again a CU-count advantage in this presentation-limited scenario — more CUs finish the trivial compute+render faster, leaving more frame budget for swapchain overhead.
+- **DX11 and Vulkan are nearly tied on the 9070 XT** at ~1750 FPS. Unlike on RTX 5090 where DX11 dominates (8955 FPS vs 3611 Vulkan), the gap is much smaller on AMD — the AMD DX11 driver does not have the same micro-optimisation advantage as NVIDIA's.
+- **DX11 leads on both GPUs** — on the 6900 XT (4,068 FPS), DX11 is 16% faster than DX12 (3,518 FPS) and 41% faster than Vulkan (2,885 FPS). At these extreme frame rates, DX11's lower per-frame CPU overhead dominates.
+- **OpenGL is severely penalised on both GPUs** — the AMD OpenGL compute overhead issue (Section 16) causes ~2.6–2.8 ms compute time vs 0.03–0.05 ms on Vulkan, a **~70× penalty**.
+- **All APIs show inflated render times** (0.1–0.8 ms) due to swapchain semaphore wait pollution (detailed in Section 6). The actual render work is ~0.04 ms.
 
 ### 5b. Cross-API Comparison — 16M Particles (Ultra), Windowed
+
+**RX 9070 XT:**
 
 | # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
 |---|-----|---------|-------------|------------|---------------|----------|------------|
@@ -548,7 +560,29 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | 3 | DX11 | 93.5 | 1.908 | 6.152 | 9.904 | 90% | GPU-bound |
 | 4 | OpenGL | 15.7 | 47.959 | 10.073 | 58.473 | 90% | GPU-bound |
 
-**16× particle scaling analysis (1M → 16M):**
+**RX 6900 XT:**
+
+| # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
+|---|-----|---------|-------------|------------|---------------|----------|------------|
+| 1 | Vulkan | 218.4 | 2.145 | 2.079 | 4.224 | 90% | GPU-bound |
+| 2 | DX12 | 205.4 | 2.113 | 1.851 | 4.028 | 90% | GPU-bound |
+| 3 | DX11 | 133.9 | 2.121 | 1.966 | 6.664 | 90% | GPU-bound |
+| 4 | OpenGL | 14.3 | 45.609 | 19.009 | 64.759 | 90% | GPU-bound |
+
+**Side-by-side 16M comparison (9070 XT vs 6900 XT):**
+
+| API | 9070 XT FPS | 6900 XT FPS | 9070 XT Compute | 6900 XT Compute | 9070 XT Render | 6900 XT Render |
+|-----|-----------|-----------|----------------|----------------|---------------|---------------|
+| Vulkan | 110.9 | 218.4 | 1.963 ms | 2.145 ms | **6.440 ms** | **2.079 ms** |
+| DX12 | 105.7 | 205.4 | 1.940 ms | 2.113 ms | **6.126 ms** | **1.851 ms** |
+| DX11 | 93.5 | 133.9 | 1.908 ms | 2.121 ms | **6.152 ms** | **1.966 ms** |
+| OpenGL | 15.7 | 14.3 | 47.959 ms | 45.609 ms | 10.073 ms | 19.009 ms |
+
+An interesting result: the RX 6900 XT **outperforms the newer RX 9070 XT at 16M particles** (218 vs 111 FPS on Vulkan), despite the 9070 XT scoring **1.4× higher in Time Spy and 1.7× higher in Steel Nomad** — and being faster in both pure compute (headless, Section 5c) and 1M windowed. The compute times are nearly identical (~2.0 ms); the difference is entirely in the **render pass**: 6.4 ms on the 9070 XT vs 2.1 ms on the 6900 XT.
+
+This is a workload-specific result that highlights what this microbenchmark actually measures. Rendering 16M individual point primitives is an extreme stress test for **primitive throughput** — the ability to set up and rasterise millions of tiny primitives per frame. The 6900 XT has 80 CUs with 1.25× more rasterisation hardware than the 9070 XT's 64 CUs, but the render time gap (3.1×) is far larger than the CU ratio alone would suggest. The 6900 XT also benefits from 128 MB Infinity Cache (vs 64 MB on the 9070 XT) and a more mature RDNA 2 driver pipeline for point primitive rendering. Standard game rendering uses far fewer, larger triangles with complex shading — a scenario where the 9070 XT's architectural improvements (higher clocks, better cache hierarchy, ray tracing hardware, improved schedulers) deliver the performance uplift reflected in 3DMark. The lesson is that no single benchmark captures all aspects of GPU performance; this microbenchmark specifically targets compute + primitive throughput, which produces a different ranking than rasterisation-focused benchmarks with complex geometry.
+
+**16× particle scaling analysis (1M → 16M) — RX 9070 XT:**
 
 | API | 1M Compute | 16M Compute | Scaling (expected 16×) | 1M FPS | 16M FPS | FPS Ratio |
 |-----|-----------|-----------|----------------------|--------|---------|-----------|
@@ -565,6 +599,8 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 
 ### 5c. Headless Compute — 1M Particles
 
+**RX 9070 XT:**
+
 | # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
 |---|-----|---------|-------------|------------|---------------|----------|------------|
 | 1 | DX12 | 21,354.0 | 0.034 | 0.0 | 0.035 | 70% | Balanced |
@@ -572,7 +608,27 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | 3 | OpenGL | 20,298.3 | 0.034 | 0.0 | 0.034 | 70% | Balanced |
 | 4 | DX11 | 16,937.8 | 0.034 | 0.0 | 0.034 | 60% | Balanced |
 
-**Windowed vs Headless comparison:**
+**RX 6900 XT:**
+
+| # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | GPU Util | Bottleneck |
+|---|-----|---------|-------------|------------|---------------|----------|------------|
+| 1 | DX12 | 15,949.6 | 0.048 | 0.0 | 0.049 | 70% | Balanced |
+| 2 | Vulkan | 15,241.5 | 0.055 | 0.0 | 0.055 | 70% | Balanced |
+| 3 | DX11 | 12,274.7 | 0.047 | 0.0 | 0.052 | 60% | Balanced |
+| 4 | OpenGL | 341.2 | 2.750 | 0.0 | 2.750 | 90% | GPU-bound |
+
+**Headless cross-GPU comparison (1M particles):**
+
+| API | 9070 XT FPS | 6900 XT FPS | 9070 XT / 6900 XT |
+|-----|-----------|-----------|-------------------|
+| Vulkan | 21,260 | 15,242 | **1.39×** |
+| DX12 | 21,354 | 15,950 | **1.34×** |
+| DX11 | 16,938 | 12,275 | **1.38×** |
+| OpenGL | 20,298 | 341 | **59.5×** |
+
+In headless mode, the 9070 XT is consistently **~1.37× faster** than the 6900 XT in pure compute — this is the true generational improvement, free of presentation throttling and render pipeline differences. The 9070 XT achieves this with 64 CUs vs 80 CUs (80% of the CU count), meaning its **per-CU compute efficiency is ~1.7× higher** than RDNA 2. The 6900 XT's OpenGL headless result (341 FPS vs 15K+ on other APIs) confirms the AMD OpenGL compute overhead persists even without a window.
+
+**RX 9070 XT — Windowed vs Headless comparison:**
 
 | API | Windowed FPS | Headless FPS | Speedup | Windowed Compute | Headless Compute |
 |-----|-------------|-------------|---------|-----------------|-----------------|
@@ -581,7 +637,7 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | DX11 | 1,773.7 | 16,937.8 | **9.5×** | 0.047 ms | 0.034 ms |
 | OpenGL | 253.4 | 20,298.3 | **80.1×** | 2.612 ms | 0.034 ms |
 
-- **All four APIs converge to identical compute time (0.034 ms)** in headless mode, proving the GPU compute hardware is equivalent regardless of API.
+- **All four APIs converge to identical compute time (0.034 ms)** on the 9070 XT in headless mode, proving the GPU compute hardware is equivalent regardless of API.
 - **OpenGL's 80× speedup** is the most dramatic — headless mode bypasses the AMD OpenGL compute dispatch overhead entirely, as the dispatch path is simpler without a rendering context.
 - **DX11 compute drops from 0.047 to 0.034 ms** in headless, suggesting the DX11 driver's implicit state management adds ~0.013 ms overhead even to compute dispatch when a swapchain is present.
 - The remaining FPS differences (21K vs 17K for DX11) reflect pure CPU-side overhead differences between APIs.
@@ -604,7 +660,7 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 | GPU | Architecture | Compute (ms) | Render (ms) | Total GPU (ms) | FPS |
 |-----|-------------|-------------|------------|---------------|-----|
 | RTX 5090 | Blackwell (170 SM) | 0.025 | 0.064 | 0.090 | 3,611 |
-| **RX 9070 XT** | **RDNA 4 (32 CU)** | **0.033** | **0.408** | **0.446** | **1,751** |
+| **RX 9070 XT** | **RDNA 4 (64 CU)** | **0.033** | **0.408** | **0.446** | **1,751** |
 | RX 6900 XT | RDNA 2 (80 CU) | 0.063 | 0.134 | 0.197 | 2,866 |
 | RX 6600 XT | RDNA 2 (32 CU) | 0.270 | 0.379 | 0.649 | 1,239 |
 | Vega FE | GCN 5 (64 CU) | 0.368 | — | — | — |
@@ -616,15 +672,16 @@ benchmark results). Charts use a dark colour scheme with API-specific colours
 |-----|-------------|--------------|------------------------------|
 | RTX 5090 | 0.025 | 0.76× | N/A (different arch) |
 | **RX 9070 XT** | **0.033** | **1.00×** | **1.00×** |
-| RX 6900 XT | 0.063 | 1.91× | 0.21× (80 CU / 0.063 ms → much lower per-CU) |
-| RX 6600 XT | 0.270 | 8.18× | 0.12× (same 32 CU, 8× slower → RDNA 4 >> RDNA 2 per-CU) |
-| RX 580 | 0.362 | 10.97× | 0.08× (36 CU) |
+| RX 6900 XT | 0.063 | 1.91× | 0.42× (80 CU → per-CU: 1.91 × 64/80 = 1.53× slower) |
+| RX 6600 XT | 0.270 | 8.18× | 0.24× (32 CU → per-CU: 8.18 × 64/32 ÷ 64 ... = 4.1× slower) |
+| RX 580 | 0.362 | 10.97× | 0.16× (36 CU) |
 
-The 9070 XT demonstrates **8.2× better compute throughput per CU than the 6600 XT** (same 32 CU count), showcasing RDNA 4's architectural improvements over RDNA 2:
-- Higher clock speed (2,805 MHz vs 2,589 MHz) accounts for only ~1.08×
-- The remaining **~7.5× improvement** comes from architectural changes: improved compute scheduler, better cache hierarchy, wider memory interface utilisation, and mature RDNA 4 driver code generation
+The 9070 XT is **8.2× faster overall** than the 6600 XT in compute. Since the 9070 XT has 2× the CU count (64 vs 32), the **per-CU efficiency improvement is ~4.1×**, which is still a massive generational leap from RDNA 2 to RDNA 4:
+- Higher clock speed (2,970 MHz vs 2,589 MHz) accounts for ~1.15×
+- 2× the CU count accounts for another ~2×
+- The remaining **~1.8× improvement** comes from architectural changes: improved compute scheduler, better cache hierarchy, wider memory interface utilisation (640 vs 256 GB/s), and mature RDNA 4 driver code generation
 
-The 9070 XT even outperforms the 80-CU RX 6900 XT in compute (0.033 vs 0.063 ms) despite having only 40% of its CU count, making it the fastest AMD compute GPU tested in this benchmark.
+The 9070 XT also outperforms the 80-CU RX 6900 XT in compute (0.033 vs 0.063 ms) despite having 80% of its CU count, making it the fastest AMD compute GPU tested in this benchmark.
 
 ---
 
@@ -792,11 +849,12 @@ This would provide a middle ground between windowed (presentation-throttled) and
 | Vega Frontier Edition | GCN 5 (Vega) | 2017 | 64 CUs | 1,600 MHz | ~13.1 | 16 GB HBM2 | 483 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
 | RX 6600 XT | RDNA 2 | 2021 | 32 CUs | 2,589 MHz | ~10.6 | 8 GB GDDR6 | 256 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
 | RX 6900 XT | RDNA 2 | 2020 | 80 CUs | 2,250 MHz | ~23.0 | 16 GB GDDR6 | 512 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
-| RX 9070 XT | RDNA 4 | 2025 | 32 CUs | 2,805 MHz | ~24.6 | 16 GB GDDR6 | 512 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
+| RX 9070 XT | RDNA 4 | 2025 | 64 CUs | 2,970 MHz | ~48.7 † | 16 GB GDDR6 | 640 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
 | Ryzen 9800X3D iGPU | RDNA 2 | 2024 | 2 CUs | 2,200 MHz | ~0.56 | Shared DDR5 | ~83 GB/s | Windows | Vulkan, DX12, DX11, OpenGL |
 
 > **Note:** FirePro D700 data is from Windows (Boot Camp). Vulkan, DX12, DX11,
 > and OpenGL results are available for GCN 1.0. All GPUs are tested on Windows.
+> † RDNA 4 uses dual-issue FP32 (each SP executes 2 FP32 ops/clock); traditional single-issue calculation yields ~24.3 TFLOPS.
 
 ---
 
@@ -806,7 +864,7 @@ This would provide a middle ground between windowed (presentation-throttled) and
 
 | # | GPU | Architecture | Best API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) | Bottleneck |
 |---|-----|-------------|----------|---------|-------------|------------|---------------|------------|
-| 1 | RX 9070 XT | RDNA 4 (32 CU) | DX11 | 1,773.7 | 0.047 | 0.451 | 0.542 | GPU-bound |
+| 1 | RX 9070 XT | RDNA 4 (64 CU) | DX11 | 1,773.7 | 0.047 | 0.451 | 0.542 | GPU-bound |
 | 2 | RX 6900 XT | RDNA 2 (80 CU) | DX11 | 4,067.9 | 0.047 | 0.140 | 0.226 | GPU-bound |
 | 3 | RX 6600 XT | RDNA 2 (32 CU) | DX12 | 1,834.4 | 0.190 | 0.215 | 0.406 | Balanced |
 | 3 | Vega FE | GCN 5 (64 CU) | DX12 | 1,715.5 | 0.219 | 0.229 | 0.452 | Balanced |
@@ -845,7 +903,7 @@ architectural efficiency from raw CU count.
 | RX 580 | GCN 4 | 36 | 0.362 | 0.0767 | **1.00×** |
 | Vega FE | GCN 5 | 64 | 0.219 | 0.0713 | 0.93× |
 | RX 6600 XT | RDNA 2 | 32 | 0.270 | 0.1157 | 1.51× |
-| RX 9070 XT | RDNA 4 | 32 | 0.033 | 0.9470 | 12.35× |
+| RX 9070 XT | RDNA 4 | 64 | 0.033 | 0.4735 | 6.17× |
 | RX 6900 XT | RDNA 2 | 80 | 0.063 | 0.1984 | 2.59× |
 | iGPU (2 CU) | RDNA 2 | 2 | 1.257 | 0.3978 | 5.19× |
 
@@ -857,7 +915,7 @@ architectural efficiency from raw CU count.
 
 Per-CU efficiency improves modestly from GCN 1.0 (0.69x) through GCN 4 (1.00x) to GCN 5 (0.93x), with Vega FE slightly below RX 580 per-CU despite being a newer architecture -- likely because the 64 CUs are not fully utilised at 1M particles. The jump to RDNA 2 brings a 1.51x per-CU improvement on the RX 6600 XT, confirming the architectural efficiency gain from GCN to RDNA.
 
-The standout result is RDNA 4: the RX 9070 XT achieves 12.35x the per-CU throughput of the RX 580, an enormous generational leap. This is partly real architectural improvement and partly because the 0.033 ms compute time is near the floor of per-dispatch overhead, meaning the GPU finishes so quickly that fixed overhead dominates less.
+The standout result is RDNA 4: the RX 9070 XT achieves 6.17× the per-CU throughput of the RX 580, a significant generational leap. This is partly real architectural improvement (higher clocks, better scheduler, 640 GB/s bandwidth vs 256 GB/s) and partly because the 0.033 ms compute time is near the floor of per-dispatch overhead, meaning the GPU finishes so quickly that fixed overhead dominates less.
 
 The iGPU (2 CU) shows 5.19x per-CU efficiency vs the RX 580, which is surprisingly high. With only 2 CUs, the workgroup scheduling overhead is minimal and the entire working set fits in cache, inflating per-CU throughput. The RX 6900 XT (2.59x) has lower per-CU than the iGPU despite being the same RDNA 2 architecture, confirming that CU scaling is sub-linear -- more CUs means more contention for memory bandwidth and cache.
 
@@ -889,6 +947,8 @@ The primary bottleneck is memory bandwidth. At 1M particles (32 MB SSBO), the wo
 Normalise all GPUs to the **RX 580 (GCN 4) = 1.00×** baseline for
 generational comparison.
 
+**Windowed 1M particles (presentation-limited for fast GPUs):**
+
 | GPU | Architecture | Year | FPS | vs RX 580 | Memory BW | BW vs RX 580 |
 |-----|-------------|------|-----|-----------|-----------|-------------|
 | HD 5770 | TeraScale 2 | 2009 | 188 | 0.21× | 76.8 GB/s | 0.30× |
@@ -897,27 +957,27 @@ generational comparison.
 | Vega FE | GCN 5 | 2017 | 1,716 | 1.88× | 483 GB/s | 1.89× |
 | RX 6600 XT | RDNA 2 | 2021 | 1,834 | 2.01× | 256 GB/s | 1.00× |
 | RX 6900 XT | RDNA 2 | 2020 | 4,068 | 4.46× | 512 GB/s | 2.00× |
-| RX 9070 XT | RDNA 4 | 2025 | 1,774 | 1.95× | 512 GB/s | 2.00× |
+| RX 9070 XT | RDNA 4 | 2025 | 1,774 | 1.95× | 640 GB/s | 2.50× |
+
+**Headless 1M particles (pure compute, no presentation overhead):**
+
+| GPU | Architecture | Headless FPS (best API) | vs RX 580 | Windowed → Headless Speedup |
+|-----|-------------|------------------------|-----------|---------------------------|
+| RX 6900 XT | RDNA 2 (80 CU) | 15,950 | 17.49× | 3.9× |
+| RX 9070 XT | RDNA 4 (64 CU) | 21,354 | 23.41× | 12.0× |
 
 **Analysis:**
 
-Vega FE achieves 1.88x the FPS of the RX 580, almost exactly matching its 1.89x bandwidth ratio. This confirms that bandwidth is the dominant performance predictor for this workload on GCN architectures.
+The windowed 1M table has an inherent limitation: fast GPUs are presentation-limited, so FPS reflects swapchain throughput rather than GPU compute speed. The RX 9070 XT (1.95×) appears slower than the RX 6900 XT (4.46×) despite having faster per-CU compute — because swapchain throttling caps the 9070 XT more severely (its 64 CUs finish compute faster, spending more time waiting for presentation).
 
-The RX 6600 XT breaks this pattern: it has identical bandwidth to the RX 580 (256 GB/s, 1.00x) yet delivers 2.01x the FPS. The extra performance comes entirely from RDNA 2's architectural efficiency -- better cache utilisation, improved compute scheduler, and higher per-CU throughput. This is the clearest evidence that architecture matters beyond raw bandwidth.
+The headless data removes this distortion. With presentation overhead eliminated:
 
-The RX 9070 XT (1.95x) is lower than the RX 6900 XT (4.46x) despite having the same 512 GB/s bandwidth. This is because the 9070 XT has only 32 CUs vs 80 CUs, and at 1M particles the presentation overhead (swapchain throttling) limits FPS before the GPU's full compute potential is reached. The 9070 XT's superior per-CU compute (0.033 ms vs 0.063 ms) is masked by windowed rendering overhead.
+- **The RX 9070 XT is the fastest AMD GPU tested** at 21,354 FPS — 1.34× faster than the 80-CU RX 6900 XT (15,950 FPS), despite having only 80% of its CU count. This means RDNA 4's per-CU compute efficiency is **~1.7× higher** than RDNA 2.
+- **The windowed → headless speedup** reveals how much performance is hidden by presentation: the 9070 XT unlocks 12× more throughput in headless mode, while the 6900 XT unlocks only 3.9× — because the 6900 XT's 80 CUs already partially saturate the presentation pipeline in windowed mode.
 
-The FPS progression does not follow TFLOPS at all: Vega FE has 13.1 TFLOPS (2.1x RX 580's 6.2) but only 1.88x FPS, while the RX 6600 XT has 10.6 TFLOPS (1.7x) but 2.01x FPS. TFLOPS remains a poor predictor for this bandwidth-bound workload.
+Bandwidth remains the dominant performance predictor on GCN: Vega FE achieves 1.88× the FPS of the RX 580, almost exactly matching its 1.89× bandwidth ratio. The RX 6600 XT breaks this pattern: identical bandwidth to the RX 580 (256 GB/s, 1.00×) yet 2.01× the FPS — evidence that RDNA 2's architectural improvements (better cache, improved scheduler, higher per-CU throughput) contribute beyond raw bandwidth.
 
-> **TODO — 16M particle re-test:** The current 1M-particle data does not
-> clearly show generational improvement because fast GPUs are
-> presentation-limited (swapchain throttle masks true compute speed).
-> Re-run all GPUs — especially RX 6900 XT and RX 9070 XT — at **16M
-> particles** and/or **headless mode** to produce a GPU-bound comparison.
-> At 16M, compute dominates and the generational progression chart will
-> reflect real architectural differences rather than presentation overhead.
-> Update this table and `images/amd_generational_progression.png`
-> afterwards.
+TFLOPS remains a poor predictor: Vega FE has 13.1 TFLOPS (2.1× the RX 580's 6.2) but only 1.88× FPS, while the RX 6600 XT has 10.6 TFLOPS (1.7×) but 2.01× FPS. This workload is bandwidth-bound, not compute-bound.
 
 ---
 
@@ -963,7 +1023,7 @@ is bandwidth-bound.
 | Vega FE (HBM2) | 483 | 1,716 | 3.55 |
 | RX 6600 XT | 256 | 1,834 | 7.16 |
 | RX 6900 XT | 512 | 4,068 | 7.95 |
-| RX 9070 XT | 512 | 1,774 | 3.46 |
+| RX 9070 XT | 640 | 1,774 | 2.77 |
 | iGPU (DDR5) | ~83 | 324 | 3.90 |
 
 **Analysis:**
@@ -983,24 +1043,26 @@ The iGPU (3.90) performs slightly above the GCN tier despite using shared DDR5. 
 Run each GPU at multiple particle counts to find the crossover point where
 the bottleneck shifts from CPU to GPU.
 
-| GPU | Architecture | 1M FPS (best API) | 16M FPS | 16×/1M Ratio |
-|-----|-------------|-------------------|---------|-------------|
-| RX 9070 XT | RDNA 4 (32 CU) | 1,774 | 111 | 16.0× |
-| RX 6900 XT | RDNA 2 (80 CU) | 4,068 | — | — |
+| GPU | Architecture | 1M FPS (best API) | 16M FPS (best API) | 16×/1M Ratio |
+|-----|-------------|-------------------|-------------------|-------------|
+| RTX 5090 | Blackwell (170 SM) | 7,737 | 612 | 12.6× |
+| RX 9070 XT | RDNA 4 (64 CU) | 1,774 | 111 | 16.0× |
+| RX 6900 XT | RDNA 2 (80 CU) | 4,068 | 218 | 18.7× |
 | RX 6600 XT | RDNA 2 (32 CU) | 1,834 | — | — |
 | Vega FE | GCN 5 (64 CU) | 1,716 | — | — |
 | RX 580 | GCN 4 (36 CU) | 912 | — | — |
 | HD 5770 | TeraScale 2 | 188 | — | — |
 | iGPU (2 CU) | RDNA 2 | 324 | — | — |
 
+> *Note: The RTX 5090 ($1,999, flagship tier) is included as a cross-vendor reference point, not as a direct competitor to the mid-range RX 9070 XT ($599) or RX 6900 XT (launched $999, now ~$400 used). Price-performance analysis is in Section 8.*
+
 **Analysis:**
 
-Only the RX 9070 XT has 16M-particle data. At 1M particles the fast GPUs (9070 XT, 6900 XT, 6600 XT) are presentation-limited — FPS reflects swapchain throughput, not GPU compute speed. The 9070 XT's 1M→16M ratio (16.0×) shows near-perfect linear scaling once GPU-bound, confirming the particle simulation workload scales linearly with particle count.
+At 1M particles, the fast GPUs are presentation-limited — FPS reflects swapchain throughput rather than GPU compute speed. The 16M column removes this limitation and reveals true GPU-bound performance.
 
-> **TODO:** Re-run all GPUs at 16M particles (and headless) to fill
-> the 16M column. This will produce a GPU-bound comparison free of
-> presentation throttling, enabling true cross-GPU and cross-generation
-> scaling analysis.
+- **RX 6900 XT leads among AMD GPUs at 16M** (218 FPS vs 111 FPS for the 9070 XT). This is not a compute advantage — the 9070 XT is faster in pure compute (headless: 21K vs 15K FPS). The difference is the render pass: 16M point primitives stress raw rasterisation throughput, where the 6900 XT's 80 CUs provide 1.25× more parallel rasterisation hardware than the 9070 XT's 64 CUs (detailed analysis in Section 5b).
+- **Scaling ratios vary by architecture**: the RX 6900 XT's 18.7× ratio (vs expected 16×) reflects its 1M score being more presentation-limited than the 9070 XT's. The RTX 5090's 12.6× suggests its 1M score was already partially GPU-bound (less room to "unlock").
+- **RTX 5090 at 16M (612 FPS)** is 2.8× the RX 6900 XT — a substantial gap, but narrower than the ~4× implied by their TFLOPS ratio (105 vs 23 TFLOPS), confirming this workload is bandwidth-bound rather than compute-bound.
 
 ---
 
@@ -1017,7 +1079,7 @@ compare per-event GPU timing, barrier cost, and command structure.
 
 | GPU | Architecture | Compute Dispatch (ms) | Barrier (ms) | Render Pass (ms) | Total GPU (ms) |
 |-----|-------------|-----------------------|-------------|-------------------|----------------|
-| RX 9070 XT | RDNA 4 (32 CU) | 0.033 | 0.005 | 0.408 | 0.446 |
+| RX 9070 XT | RDNA 4 (64 CU) | 0.033 | 0.005 | 0.408 | 0.446 |
 | RX 6900 XT | RDNA 2 (80 CU) | 0.063 | < 0.001 | 0.133 | 0.196 |
 | RX 6600 XT | RDNA 2 (32 CU) | 0.270 | < 0.001 | 0.379 | 0.649 |
 | Vega FE | GCN 5 (64 CU) | 0.219 | 0.001 | 0.275 | 0.495 |
@@ -1110,7 +1172,7 @@ performance scaling.
 
 | GPU | Architecture | This Benchmark | 3DMark Time Spy | 3DMark Fire Strike | Deviation (TS) | Deviation (FS) |
 |-----|-------------|---------------|----------------|-------------------|----------------|----------------|
-| RX 9070 XT | RDNA 4 (32 CU) | 1.95× | 6.49× | 4.44× | −70.0% | −56.1% |
+| RX 9070 XT | RDNA 4 (64 CU) | 1.95× | 6.49× | 4.44× | −70.0% | −56.1% |
 | RX 6900 XT | RDNA 2 (80 CU) | 4.46× | 4.63× | 3.82× | −3.7% | +16.8% |
 | RX 6600 XT | RDNA 2 (32 CU) | 2.01× | 2.16× | 1.92× | −7.0% | +4.9% |
 | Vega FE | GCN 5 (64 CU) | 1.88× | 1.59× | 1.46× | +18.2% | +28.8% |
@@ -1136,10 +1198,10 @@ performance scaling.
 
 The deviations reveal how this benchmark's single-dispatch compute workload differs from 3DMark's complex multi-pass rasterisation:
 
-- **RX 9070 XT (−70.0% TS, −56.1% FS)**: The largest deviation. In 3DMark, the 9070 XT exercises its full RDNA 4 feature set (mesh shaders, ray tracing units, 32 CUs at full utilisation). In this benchmark, FPS is presentation-limited at 1,774 FPS — the GPU finishes compute in 0.033 ms but waits for swapchain presentation. This is a known limitation discussed in Section 6.
+- **RX 9070 XT (−70.0% TS, −56.1% FS)**: The largest deviation. In 3DMark, the 9070 XT exercises its full RDNA 4 feature set (mesh shaders, ray tracing units, 64 CUs at full utilisation). In this benchmark, windowed FPS is presentation-limited at 1,774 FPS — the GPU finishes compute in 0.033 ms but waits for swapchain presentation (Section 6). **Headless mode resolves this**: at 21,354 FPS (23.41× vs RX 580), the deviation flips to +261% (TS) and +427% (FS) — confirming that when presentation overhead is removed, this compute benchmark massively favours the 9070 XT over 3DMark's rasterisation workloads. The windowed deviation measures presentation bottleneck; the headless deviation measures the fundamental compute-vs-rasterisation gap.
 - **Vega FE (+18.2% TS, +28.8% FS)**: HBM2's 483 GB/s bandwidth disproportionately benefits this bandwidth-bound compute workload. 3DMark's texture-heavy scenes do not benefit as much from raw bandwidth.
 - **iGPU (+119% TS, +132% FS)**: The 2-CU iGPU overperforms relative to 3DMark because this benchmark's simple compute workload fits well within the iGPU's cache and DDR5 bandwidth is adequate for 2 CUs. 3DMark's complex geometry and texture workloads expose the iGPU's limited shader count.
-- **RX 6900 XT (−3.7% TS)** and **RX 6600 XT (−7.0% TS)**: Within the expected ±10% range for Time Spy, confirming that RDNA 2 GPUs are well-correlated. Fire Strike deviations are slightly higher (+16.8% and +4.9%) because DX11's heavier CPU overhead in 3DMark penalises complex scenes more than this benchmark's single-dispatch Vulkan path.
+- **RX 6900 XT (−3.7% TS)** and **RX 6600 XT (−7.0% TS)**: Within the expected ±10% range for Time Spy in windowed mode, confirming that RDNA 2 GPUs are well-correlated. In headless mode, the 6900 XT jumps to 17.49× (vs 4.46× windowed), yielding +278% (TS) and +358% (FS) deviations — similar to the 9070 XT pattern, confirming that all fast GPUs are presentation-limited in windowed mode. Fire Strike deviations are slightly higher (+16.8% and +4.9%) because DX11's heavier CPU overhead in 3DMark penalises complex scenes more than this benchmark's single-dispatch Vulkan path.
 - **HD 5770 (+106.8% FS)**: Similar to the iGPU — TeraScale 2's limited shader hardware handles this simple compute workload relatively better than 3DMark's complex rasterisation. No Time Spy comparison possible (no DX12).
 
 The large deviations for the 9070 XT (presentation-limited) and the low-end GPUs (iGPU, HD 5770) confirm that this benchmark measures a fundamentally different aspect of GPU performance (bandwidth-bound compute + presentation overhead) compared to 3DMark (shader-heavy rasterisation). GPUs in their GPU-bound regime (6900 XT, 6600 XT) show strong correlation. Both benchmarks are needed for a complete performance picture.
@@ -1256,8 +1318,8 @@ cross-API testing (Section 5):
 
 | Observation | Explanation |
 |-------------|-------------|
-| RDNA 4 (9070 XT) achieves 8.2× better per-CU compute than RDNA 2 (6600 XT) at same 32 CU count | Higher clocks (1.08×) + architectural improvements in scheduler, cache hierarchy, and driver codegen account for the remaining ~7.5× |
-| 9070 XT outperforms 80-CU RX 6900 XT in compute (0.033 vs 0.063 ms) despite 40% CU count | RDNA 4's per-CU efficiency leap is large enough to overcome the 2.5× CU disadvantage |
+| RDNA 4 (9070 XT) achieves 4.1× better per-CU compute than RDNA 2 (6600 XT) with 2× the CU count (64 vs 32) | Higher clocks (1.15×) + architectural improvements in scheduler, cache hierarchy, and driver codegen account for the remaining ~1.8× |
+| 9070 XT outperforms 80-CU RX 6900 XT in compute (0.033 vs 0.063 ms) despite 80% CU count | RDNA 4's per-CU efficiency (~1.7× higher) is enough to overcome the 1.25× CU disadvantage |
 | API ranking on 9070 XT (DX11 ≈ Vulkan > DX12 > OpenGL) differs from RTX 5090 (DX11 >> DX12 > Vulkan > OpenGL) | AMD's DX11 driver is less optimised than NVIDIA's; the gap between explicit and implicit APIs is much smaller on AMD |
 | OpenGL compute overhead persists on RDNA 4 (~2.6 ms) at similar levels to RDNA 2 (~2.7 ms) | AMD's OpenGL-to-Vulkan translation layer has not improved compute dispatch overhead across generations |
 | 9070 XT compute scales 59× for 16× particle increase (1M → 16M) | Super-linear: at 1M particles GPU is underutilised, per-dispatch overhead dominates; at 16M the ALUs and bandwidth are fully saturated |
@@ -1291,7 +1353,7 @@ Baseline: **RX 580** = 1.00×
 | GPU | Architecture | This Benchmark | 3DMark Time Spy | 3DMark Fire Strike | Deviation (TS) | Deviation (FS) |
 |-----|-------------|---------------|----------------|-------------------|----------------|----------------|
 | RTX 5090 | Blackwell (170 SM) | 8.49× | 8.66× | 5.62× | −2.0% | +51.1% |
-| RX 9070 XT | RDNA 4 (32 CU) | 1.95× | 6.49× | 4.44× | −70.0% | −56.1% |
+| RX 9070 XT | RDNA 4 (64 CU) | 1.95× | 6.49× | 4.44× | −70.0% | −56.1% |
 | RX 6900 XT | RDNA 2 (80 CU) | 4.46× | 4.63× | 3.82× | −3.7% | +16.8% |
 | RX 6600 XT | RDNA 2 (32 CU) | 2.01× | 2.16× | 1.92× | −7.0% | +4.9% |
 | Vega FE | GCN 5 (64 CU) | 1.88× | 1.59× | 1.46× | +18.2% | +28.8% |
@@ -1426,6 +1488,40 @@ OpenGL 4.3 remains the most portable option — it runs on Windows, Linux, and m
 The RTX 5090 (21,760 CUDA cores, ~3,000 GB/s bandwidth) outperforms the Zen 4 iGPU (128 shaders, ~50 GB/s shared DDR5) by approximately **37×** in GPU execution time. This aligns with the memory bandwidth ratio (~60×), confirming the particle simulation is **bandwidth-bound** rather than compute-bound at this scale.
 
 The RX 9070 XT sits between these extremes: its compute time (0.033 ms) is comparable to the RTX 5090 (0.035 ms), but its total GPU time (0.446 ms) is 5.6× higher due to **swapchain semaphore wait pollution** inflating the render timestamp (see Section 6). In headless mode, the 9070 XT achieves 21,260 FPS — only ~15% behind the RTX 5090's headless throughput.
+
+### RTX 5090 — 16M Particles (Ultra), Windowed
+
+| # | API | Avg FPS | Compute (ms) | Render (ms) | Total GPU (ms) |
+|---|-----|---------|-------------|------------|---------------|
+| 1 | DX12 | 611.7 | 0.581 | 0.730 | 1.312 |
+| 2 | Vulkan | 539.9 | 0.628 | 1.006 | 1.635 |
+| 3 | DX11 | 470.0 | 0.605 | 0.771 | 2.000 |
+| 4 | OpenGL | 457.6 | 0.580 | 0.969 | 1.550 |
+
+At 16M particles the RTX 5090 remains fast enough that **DX12 retakes the lead** from DX11 (612 vs 470 FPS). The workload is now GPU-bound, so DX11's low CPU overhead advantage disappears and its higher total GPU time (2.000 ms, likely due to implicit barrier overhead) becomes the bottleneck.
+
+### RTX 5090 — Headless Compute, 1M Particles
+
+| # | API | Avg FPS | Compute (ms) | Total GPU (ms) |
+|---|-----|---------|-------------|---------------|
+| 1 | DX11 | 37,564 | 0.000 | 0.000 |
+| 2 | OpenGL | 35,110 | 0.018 | 0.020 |
+| 3 | Vulkan | 26,358 | 0.023 | 0.025 |
+| 4 | DX12 | 24,758 | 0.014 | 0.014 |
+
+> **DX11 timestamp anomaly:** The RTX 5090's DX11 headless mode reports 0.000 ms for all GPU timing metrics, suggesting NVIDIA's DX11 driver does not support timestamp queries in headless/compute-only mode. The 37,564 FPS figure is valid (derived from CPU-side frame timing), but the GPU time breakdown is unavailable.
+
+**Cross-vendor headless comparison (1M particles, best API):**
+
+| GPU | Best Headless FPS | Best API | Price (MSRP) | FPS per $ |
+|-----|------------------|----------|-------------|-----------|
+| RTX 5090 | 37,564 | DX11 | $1,999 | 18.8 |
+| RX 9070 XT | 21,354 | DX12 | $599 | 35.6 |
+| RX 6900 XT | 15,950 | DX12 | $999 (launched) | 16.0 |
+
+The RTX 5090 achieves 1.76× the headless throughput of the RX 9070 XT — a significant lead, but far from the ~2.2× TFLOPS ratio (105 vs 48.7 TFLOPS) or the ~2.8× bandwidth ratio (1,792 vs 640 GB/s). On a **price-performance basis**, the RX 9070 XT delivers **1.9× the FPS per dollar** of the RTX 5090 for this compute workload. Even comparing Vulkan-to-Vulkan (26,358 vs 21,260 FPS), the 5090's lead narrows to just 1.24×.
+
+This confirms that for bandwidth-bound compute workloads, mid-range GPUs offer substantially better value than flagships — the RTX 5090's additional CUDA cores and memory bandwidth face diminishing returns when the workload cannot saturate them.
 
 ---
 
@@ -1918,7 +2014,9 @@ Additionally, API performance rankings are architecture-dependent: DX11 leads on
 | DX11 headless requires workarounds for timestamp queries | Without `Present()` as a frame boundary, DX11's timestamp pipeline produces garbage values; sanity filtering discards ~3–4% of samples |
 | OpenGL headless requires periodic `glFinish()` on AMD | AMD's driver doesn't actively process commands for hidden windows; periodic full sync every 16 frames restores timestamp availability |
 | 3DMark Unlimited ≠ headless compute | 3DMark Unlimited renders offscreen (full pipeline); this benchmark's headless mode skips rendering entirely (compute only) |
-| RX 9070 XT (RDNA 4) has 8.2× better per-CU compute than RX 6600 XT (RDNA 2) | Higher clocks (1.08×) account for only a fraction; the rest is architectural improvement in scheduler, cache, and driver codegen |
+| RX 9070 XT (RDNA 4) has 4.1× better per-CU compute than RX 6600 XT (RDNA 2) | 2× the CU count (64 vs 32), 1.15× higher clocks; the remaining ~1.8× is architectural improvement in scheduler, cache, and driver codegen |
+| 9070 XT outperforms 80-CU RX 6900 XT in headless compute (21K vs 16K FPS) | RDNA 4's per-CU efficiency (~1.7× higher) overcomes the 1.25× CU disadvantage; on a per-dollar basis, 9070 XT delivers 1.9× the FPS/$ of RTX 5090 |
+| 16M particles reveals primitive throughput bottleneck | RX 6900 XT (218 FPS) beats 9070 XT (111 FPS) at 16M — 80 CUs provide 1.25× more rasterisation hardware; RTX 5090 (612 FPS) leads due to 170 SMs |
 | 9070 XT compute scales 59× for 16× particles (1M → 16M) | Super-linear scaling due to GPU underutilisation at 1M; at 16M the GPU is fully saturated |
 | 9070 XT headless achieves 21K FPS across all APIs | All APIs converge to 0.034 ms compute; windowed mode's 1.7K FPS is 12× slower due to presentation overhead |
 
@@ -2057,7 +2155,7 @@ Including the Adreno 640 also provides unique data points not available from any
 | Component | Specification |
 |-----------|--------------|
 | Device | Xiaomi Pad 5 (nabu) — Android tablet running Windows 11 ARM64 via [Renegade Project](https://github.com/edk2-porting) / [Port-Windows-11-Xiaomi-Pad-5](https://github.com/erdilS/Port-Windows-11-Xiaomi-Pad-5) |
-| Previous OSs | Android 15 (HyperOS 2) |
+| Previous OS | Android 15 (HyperOS 2) |
 | Current OS | Windows 11 Pro ARM64 (NT 10.0.26100) |
 | SoC | Qualcomm Snapdragon 860 (SM8150-AC) — a binned Snapdragon 855+ |
 | CPU | Kryo 585: 1× A77 @ 2.96 GHz (prime) + 3× A77 @ 2.42 GHz (performance) + 4× A55 @ 1.80 GHz (efficiency) |
@@ -2070,7 +2168,6 @@ Including the Adreno 640 also provides unique data points not available from any
 | OpenGL | **Not supported** — Qualcomm's Windows driver does not expose desktop OpenGL. Microsoft's OpenCL/OpenGL Compatibility Pack provides only GL 3.3 via Mesa-on-DX12 translation, below this benchmark's GL 4.3 requirement. (The same hardware supports OpenGL ES 3.2 on Android, and the open-source Mesa Freedreno driver achieves full OpenGL 4.6 on Linux.) |
 | Display | 11" 2560×1600 IPS 120 Hz (benchmark runs at 1280×720) |
 | Thermal | Passive cooling only (tablet form factor, no fan) |
-| OS | Windows 11 Pro ARM64 (NT 10.0.26100) |
 | Resolution | 1280 × 720 |
 | V-Sync | OFF |
 

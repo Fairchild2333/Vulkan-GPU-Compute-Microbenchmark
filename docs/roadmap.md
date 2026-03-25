@@ -88,21 +88,20 @@ On startup (when no CLI flags are given), the application presents:
 
 ### RenderDoc Capture & Cross-GPU Analysis (P0 — next up)
 
-End-to-end RenderDoc profiling on multiple GPUs: **RX 9070 XT** (RDNA 4, 32 CU),
+End-to-end RenderDoc profiling on multiple GPUs: **RX 9070 XT** (RDNA 4, 64 CU),
 **RX 6900 XT** (RDNA 2, 80 CU), and the AMD iGPU (2 CU) as baseline.
 Full step-by-step guide: [`renderdoc-capture-guide.md`](renderdoc-capture-guide.md).
 
-- [ ] Run baseline benchmarks (9070 XT + 6900 XT + iGPU, Vulkan + DX11) without RenderDoc.
-- [ ] Capture one Vulkan frame on each GPU via `--capture 5` (at 5s mark).
-- [ ] Take 7 annotated screenshots (event list, compute pipeline, SSBO data,
+- [x] Run baseline benchmarks (9070 XT + 6900 XT + iGPU, Vulkan + DX11) without RenderDoc.
+- [x] Capture one Vulkan frame on each GPU via `--capture 5` (at 5s mark).
+- [x] Take 7 annotated screenshots (event list, compute pipeline, SSBO data,
       graphics pipeline, barrier, render output, per-event timing).
-- [ ] Cross-validate app timestamp queries against RenderDoc GPU timing (< 5 %
+- [x] Cross-validate app timestamp queries against RenderDoc GPU timing (< 5 %
       deviation target).
-- [ ] Write cross-GPU comparison (CU scaling, memory bandwidth, barrier cost).
-- [ ] Compare RDNA 4 vs RDNA 2 per-CU efficiency via RenderDoc per-event timing.
-- [ ] Propose optimisations (Vulkan 1.3 barriers, ping-pong buffer, indirect
-      dispatch, dynamic point size, host-visible on iGPU).
-- [ ] Fill in [`renderdoc-analysis.md`](renderdoc-analysis.md) and
+- [x] Write cross-GPU comparison (CU scaling, memory bandwidth, barrier cost).
+- [x] Compare RDNA 4 vs RDNA 2 per-CU efficiency via RenderDoc per-event timing.
+- [x] ~~Propose optimisations~~ — deferred; current analysis is sufficient.
+- [x] Fill in [`renderdoc-analysis.md`](renderdoc-analysis.md) and
       update [`report.md`](report.md).
 
 Code integration already complete:
@@ -187,10 +186,10 @@ range of AMD and NVIDIA hardware spanning 16 years (2009–2025):
 | GPU | Architecture | CUs / SPs | VRAM | Platform | Notes |
 |-----|-------------|-----------|------|----------|-------|
 | **RTX 5090** | Blackwell (NVIDIA) | 170 SMs | 32 GB GDDR7 | Windows | Current flagship — reference for cross-vendor comparison |
-| **RX 9070 XT** | RDNA 4 (AMD) | 32 CUs | 16 GB GDDR6 | Windows | Latest AMD architecture — fastest per-CU compute tested |
+| **RX 9070 XT** | RDNA 4 (AMD) | 64 CUs | 16 GB GDDR6 | Windows | Latest AMD architecture — fastest per-CU compute tested |
 | GTX 970 | Maxwell (NVIDIA) | 13 SMs | 4 GB GDDR5 | Windows | Older NVIDIA — reveals API ranking reversal vs modern GPUs |
 | RX 6900 XT | RDNA 2 | 80 CUs | 16 GB | Windows | Flagship RDNA 2 |
-| RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Windows | Mid-range RDNA 2 — same CU count as 9070 XT for per-CU comparison |
+| RX 6600 XT | RDNA 2 | 32 CUs | 8 GB | Windows | Mid-range RDNA 2 — half the CU count of 9070 XT, enables per-CU comparison |
 | Vega Frontier Edition | Vega (GCN 5) | 64 CUs | 16 GB HBM2 | Windows | Prosumer / compute |
 | RX 580 | Polaris (GCN 4) | 36 CUs | 8 GB | Windows | Mid-range GCN — baseline for normalised comparisons |
 | FirePro D700 | Tahiti (GCN 1.0) | 2048 SPs | 6 GB | Windows | Mac Pro 2013 dual-GPU — each card benchmarked independently |
@@ -224,15 +223,15 @@ The document covers:
 - Scaling behaviour when increasing particle count (65 K → 1 M → 16 M).
 - Compute vs render timing breakdown per GPU (and CPU via WARP).
 - Hardware vs software rendering comparison (discrete GPU vs WARP baseline).
-- RX 9070 XT (RDNA 4) vs RX 6600 XT (RDNA 2): **8.2× per-CU compute improvement**
-  at the same 32-CU count, demonstrating generational architectural gains.
+- RX 9070 XT (RDNA 4) vs RX 6600 XT (RDNA 2): **4.1× per-CU compute improvement**
+  with 2× the CU count (64 vs 32), demonstrating generational architectural gains.
 - Headless compute mode: removing swapchain/render/present reveals true compute
   throughput — RX 9070 XT achieves 21,000+ FPS in headless vs 1,750 windowed.
 - Swapchain semaphore wait pollution analysis — why fast GPUs (9070 XT, RTX 5090)
   report inflated render timestamps in windowed mode.
 - Cross-validation against 3DMark Time Spy and Fire Strike across all GPUs.
 - OpenGL compute dispatch overhead on AMD GPUs (2.6–48 ms, vs 0.03 ms on Vulkan).
-- Generational progression from TeraScale 2 → GCN 1.0 → GCN 4 → GCN 5 → RDNA 2 → RDNA 3.
+- Generational progression from TeraScale 2 → GCN 1.0 → GCN 4 → GCN 5 → RDNA 2 → RDNA 4.
 - Mac Pro 2013 dual-GPU analysis: display GPU vs headless GPU performance
   isolation, and macOS Metal vs Boot Camp DX11 cross-platform comparison.
 
